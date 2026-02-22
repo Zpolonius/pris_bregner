@@ -19,9 +19,37 @@ ZONE_MAPS = {
 
 def get_zone(row, country):
     if country == "DK": return "Standard"
-    postnr = str(row.get('Modtagers postnummer', ''))[:2]
-    maps = ZONE_MAPS.get(country, {})
-    return maps.get(postnr, maps.get("DEFAULT", f"Zone 1 ({country})"))
+    
+    # Rens postnummer (fjern mellemrum og sørg for tekst)
+    raw_postnr = str(row.get('Modtagers postnummer', '')).replace(' ', '').strip()
+    
+    if country == "SE":
+        prefix = raw_postnr[:2]
+        maps = ZONE_MAPS.get("SE", {})
+        return maps.get(prefix, maps.get("DEFAULT", "SOUTH-2"))
+        
+    elif country == "NO":
+        # Norge: Sørg for 4 cifre (f.eks. 512 -> 0512)
+        try:
+            # Vi tager kun de første 4 cifre hvis der er flere (f.eks. ved fejl-data)
+            clean_nr = "".join(filter(str.isdigit, raw_postnr))[:4].zfill(4)
+            p_int = int(clean_nr)
+            
+            if p_int <= 1299: return "OSL"
+            elif p_int <= 1999: return "NOR2"
+            elif p_int <= 3999: return "NOR2" # Resten af NOR2 intervallet
+            elif p_int <= 7999: return "NOR3"
+            elif p_int <= 8999: return "NOR4"
+            else: return "NORS"
+        except:
+            return "NOR2" # Default for Norge
+            
+    elif country == "FI":
+        prefix = raw_postnr[:2]
+        maps = ZONE_MAPS.get("FI", {})
+        return maps.get(prefix, maps.get("DEFAULT", "FI01"))
+        
+    return f"Zone 1 ({country})"
 
 def get_weight_bracket(weight, w_steps):
     """Beregner hvilken vægtklasse pakken tilhører til oversigten"""
