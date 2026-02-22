@@ -47,14 +47,23 @@ with col_title:
 # --- SIDEBAR ---
 with st.sidebar:
     st.image("logo/bring_new_logo.png", width=200)
-    st.header("1. Upload Data")
-    uploaded_files = st.file_uploader("Upload CSV eller Excel-rapporter", type=["csv", "xlsx", "xls"], accept_multiple_files=True)
+    st.header("1. Vælg Datakilde")
+    data_source = st.radio(
+        "Hvordan vil du indlæse data?",
+        ["Upload Rapport (CSV/Excel)", "Manuel Estimering (Indtast volumen)"]
+    )
+    
+    master_df = None
+    
+    if data_source == "Upload Rapport (CSV/Excel)":
+        uploaded_files = st.file_uploader("Upload rapporter", type=["csv", "xlsx", "xls"], accept_multiple_files=True)
+    else:
+        st.info("Indtast volumen (antal pakker) direkte i fanerne under punkt 3.")
+        valgte_lande = st.multiselect("Vælg lande til estimering:", ["DK", "SE", "NO", "FI"], default=["DK"])
+        uploaded_files = None # Signalere manuel mode
     
     st.divider()
-    model_type = st.radio(
-        "2. Vælg Prismodel",
-        ["Enhedspris (Fast pris)", "Vægtbaseret pris (Matrix)"]
-    )
+# ... (rest of sidebar) ...
     
     st.divider()
     st.header("📈 Forhandling & Justering")
@@ -300,52 +309,42 @@ if uploaded_files:
     # 7. EKSPORT TIL EXCEL
     st.divider()
     st.subheader("📥 Generer Rapport")
-    st.markdown("Hent en komplet Excel-rapport til kunden eller internt brug.")
     
-    # Sikkerheds-rensning for at undgå Excel Injection
     def sanitize_for_excel(df):
-        # Vi laver en kopi for ikke at ændre i den aktive dataframe i UI'en
         clean_df = df.copy()
         for col in clean_df.select_dtypes(include=['object']):
-            # Celler der starter med =, +, - eller @ kan trigge formler i Excel
             clean_df[col] = clean_df[col].apply(lambda x: f"'{x}" if str(x).startswith(('=', '+', '-', '@')) else x)
         return clean_df
 
-    # Funktion til at skabe Excel-fil i hukommelsen
     def create_excel_report(df, breakdown_df, settings):
         output = io.BytesIO()
-        # Rens data før eksport
         safe_df = sanitize_for_excel(df)
-        
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Ark 1: Dashboard / Indstillinger
             settings_df = pd.DataFrame(list(settings.items()), columns=['Parameter', 'Værdi'])
             settings_df.to_excel(writer, sheet_name='Dashboard', index=False)
-            
-            # Ark 2: Oversigt pr. Land
             breakdown_df.to_excel(writer, sheet_name='Land Oversigt')
-            
-            # Ark 3: Detaljeret Data
             safe_df.to_excel(writer, sheet_name='Data Grundlag', index=False)
-            
         return output.getvalue()
 
     settings_summary = {
         "Projekt": "Bring Nordic Master Analyse",
+        "Kilde": data_source,
         "Dato": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
         "Prismodel": model_type,
         "Prisjustering (%)": adj_pct,
         "Volumen-vækst (%)": vol_adj_pct,
         "Est. Antal Pakker": int(total_count),
-        "Samlet Besparelse (%)": f"{(total_diff/total_old*100):.1f}%" if total_old else "0%"
+        "Samlet Ny Omsætning": int(total_new)
     }
+    if total_old > 0:
+        settings_summary["Samlet Besparelse (%)"] = f"{(total_diff/total_old*100):.1f}%"
 
     excel_data = create_excel_report(master_df, breakdown, settings_summary)
     
     st.download_button(
         label="📥 Hent komplet Excel-rapport (.xlsx)",
         data=excel_data,
-        file_name=f"Bring_Nordic_Analyse_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        file_name=f"Bring_Analyse_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
