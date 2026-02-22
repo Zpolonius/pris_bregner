@@ -102,38 +102,34 @@ if uploaded_files:
         
     master_df = pd.concat(dfs, ignore_index=True)
     
-    # --- DATA RENSNING ---
+    # --- DATA RENSNING (Flyttet op for at sikre kolonner) ---
+    relevante_kolonner = ['Land leveringsadresse', 'Vægt (kg)', 'Aftalepris', 'Modtagers postnummer', 'Produkt']
+    for col in relevante_kolonner:
+        if col not in master_df.columns:
+            master_df[col] = 0.0 if col in ['Vægt (kg)', 'Aftalepris'] else "UKENDT"
+
+    # Fyld standardværdier og rens typer
+    master_df['Land leveringsadresse'] = master_df['Land leveringsadresse'].fillna('UKENDT').astype(str).str.strip().upper()
+    
+    def clean_numeric(val):
+        if pd.isna(val): return 0.0
+        s = str(val).replace(' ', '').replace(',', '.')
+        try: return float(s)
+        except: return 0.0
+
+    master_df['Vægt (kg)'] = master_df['Vægt (kg)'].apply(clean_numeric)
+    master_df['Aftalepris'] = master_df['Aftalepris'].apply(clean_numeric)
+    master_df['Modtagers postnummer'] = master_df['Modtagers postnummer'].fillna('0000').astype(str).str.strip()
+    master_df['Produkt'] = master_df['Produkt'].fillna('Ukendt').astype(str).str.strip()
+
     with st.expander("🛠️ Se data-rensning (håndtering af tomme celler)"):
-        # Vi fokuserer kun på de kolonner vi rent faktisk bruger
-        relevante_kolonner = ['Land leveringsadresse', 'Vægt (kg)', 'Aftalepris', 'Modtagers postnummer', 'Produkt']
-        for col in relevante_kolonner:
-            if col not in master_df.columns:
-                master_df[col] = 0 if col in ['Vægt (kg)', 'Aftalepris'] else "UKENDT"
-
         missing_report = master_df[relevante_kolonner].isna().sum()
-        st.write("Fundne tomme celler pr. kolonne:", missing_report[missing_report > 0])
-        
-        # Fyld standardværdier og rens typer
-        master_df['Land leveringsadresse'] = master_df['Land leveringsadresse'].fillna('UKENDT').astype(str).str.strip().upper()
-        
-        # Stærk tal-konvertering
-        def clean_numeric(val):
-            if pd.isna(val): return 0.0
-            s = str(val).replace(' ', '').replace(',', '.')
-            try: return float(s)
-            except: return 0.0
-
-        master_df['Vægt (kg)'] = master_df['Vægt (kg)'].apply(clean_numeric)
-        master_df['Aftalepris'] = master_df['Aftalepris'].apply(clean_numeric)
-        master_df['Modtagers postnummer'] = master_df['Modtagers postnummer'].fillna('0000').astype(str).str.strip()
-        master_df['Produkt'] = master_df['Produkt'].fillna('Ukendt').astype(str).str.strip()
-        
+        st.write("Udfyldte manglende værdier i følgende kolonner:", missing_report[missing_report == 0].index.tolist())
         st.success("Data er renset og klar til analyse.")
 
-    if 'Land leveringsadresse' in master_df.columns:
-        aktive_lande = sorted([l for l in master_df['Land leveringsadresse'].unique().tolist() if l != 'UKENDT'])
-    else:
-        st.error("Kunne ikke finde kolonnen 'Land leveringsadresse'. Tjek formatet.")
+    aktive_lande = sorted([l for l in master_df['Land leveringsadresse'].unique().tolist() if l != 'UKENDT'])
+    if not aktive_lande:
+        st.warning("Ingen gyldige lande fundet i data (tjek kolonnen 'Land leveringsadresse').")
         st.stop()
         
     st.success(f"Fandt data for følgende lande: {', '.join(aktive_lande)}")
@@ -264,6 +260,17 @@ if uploaded_files:
         margins_name="Total"
     )
     
+    # Sorter kolonner numerisk (undtagen 'Total')
+    cols = [c for c in pivot_table.columns if c != 'Total']
+    # En simpel sorteringsnøgle der kigger på det første tal i strengen "X-Y kg"
+    def weight_sort_key(s):
+        if '>' in s: return 999
+        try: return float(s.split('-')[0])
+        except: return 0
+    
+    sorted_cols = sorted(cols, key=weight_sort_key) + ['Total']
+    pivot_table = pivot_table[sorted_cols]
+    
     # Skalering og pæn formatering
     pivot_table = (pivot_table * vol_multiplier).round(0).astype(int)
     
@@ -291,23 +298,24 @@ if uploaded_files:
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             # Ark 1: Dashboard / Indstillinger
-            settings_df = pd.DataFrame([settings])
+            settings_df = pd.DataFrame(list(settings.items()), columns=['Parameter', 'Værdi'])
             settings_df.to_excel(writer, sheet_name='Dashboard', index=False)
             
             # Ark 2: Oversigt pr. Land
             breakdown_df.to_excel(writer, sheet_name='Land Oversigt')
             
             # Ark 3: Detaljeret Data
-            df.to_excel(writer, sheet_name='Data Grundlag', index=False)
+            safe_df.to_excel(writer, sheet_name='Data Grundlag', index=False)
             
         return output.getvalue()
 
     settings_summary = {
-        "Simuleret af": "Bring Nordic Master-Beregner",
+        "Projekt": "Bring Nordic Master Analyse",
+        "Dato": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
         "Prismodel": model_type,
-        "Global Prisjustering (%)": adj_pct,
+        "Prisjustering (%)": adj_pct,
         "Volumen-vækst (%)": vol_adj_pct,
-        "Antal Pakker (Est.)": int(total_count),
+        "Est. Antal Pakker": int(total_count),
         "Samlet Besparelse (%)": f"{(total_diff/total_old*100):.1f}%" if total_old else "0%"
     }
 
@@ -316,7 +324,7 @@ if uploaded_files:
     st.download_button(
         label="📥 Hent komplet Excel-rapport (.xlsx)",
         data=excel_data,
-        file_name=f"Bring_Nordic_Analyse_{valgt_land_oversigt}.xlsx",
+        file_name=f"Bring_Nordic_Analyse_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
