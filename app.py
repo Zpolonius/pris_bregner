@@ -60,7 +60,13 @@ with st.sidebar:
     else:
         st.info("Indtast volumen (antal pakker) direkte i fanerne under punkt 3.")
         valgte_lande = st.multiselect("Vælg lande til estimering:", ["DK", "SE", "NO", "FI"], default=["DK"])
-        uploaded_files = None # Signalere manuel mode
+        uploaded_files = None
+    
+    st.divider()
+    model_type = st.radio(
+        "2. Vælg Prismodel",
+        ["Enhedspris (Fast pris)", "Vægtbaseret pris (Matrix)"]
+    )
     
     st.divider()
 # ... (rest of sidebar) ...
@@ -88,87 +94,96 @@ with st.sidebar:
     st.info(f"Beregninger baseres på {vol_multiplier:.2f}x nuværende volumen.")
 
 # --- HOVEDPROGRAM ---
-if uploaded_files:
-    # 1. Saml alle uploadede filer
-    dfs = []
-    for f in uploaded_files:
-        try:
-            if f.name.endswith('.csv'):
-                temp_df = pd.read_csv(f, sep=None, engine='python', encoding_errors='replace')
-            else:
-                temp_df = pd.read_excel(f)
-            temp_df.columns = [str(c).strip() for c in temp_df.columns]
-            dfs.append(temp_df)
-        except Exception as e:
-            st.error(f"Fejl ved indlæsning af {f.name}: {e}")
-    
-    if not dfs:
-        st.stop()
+if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and valgte_lande):
+    if data_source == "Upload Rapport (CSV/Excel)":
+        # 1. Saml alle uploadede filer
+        dfs = []
+        # Sikkerhedstjek for at undgå linter-fejl (None type not iterable)
+        files_to_process = uploaded_files if uploaded_files is not None else []
+        for f in files_to_process:
+            try:
+                if f.name.endswith('.csv'):
+                    temp_df = pd.read_csv(f, sep=None, engine='python', encoding_errors='replace')
+                else:
+                    temp_df = pd.read_excel(f)
+                temp_df.columns = [str(c).strip() for c in temp_df.columns]
+                dfs.append(temp_df)
+            except Exception as e:
+                st.error(f"Fejl ved indlæsning af {f.name}: {e}")
         
-    master_df = pd.concat(dfs, ignore_index=True)
-    
-    # --- KOLONNE MAPPING (Sikkerhedsventil for sælgere) ---
-    required_cols = {
-        'Land leveringsadresse': ['Land leveringsadresse', 'Country', 'Land'],
-        'Vægt (kg)': ['Vægt (kg)', 'Vægt', 'Weight'],
-        'Aftalepris': ['Aftalepris', 'Pris', 'Price', 'Faktureret beløb'],
-        'Modtagers postnummer': ['Modtagers postnummer', 'Postnummer', 'Zip', 'Zip code'],
-        'Produkt': ['Produkt', 'Product', 'Service']
-    }
-    
-    mapping = {}
-    missing_cols = []
-    
-    for key, alts in required_cols.items():
-        found = False
-        for alt in alts:
-            if alt in master_df.columns:
-                mapping[key] = alt
-                found = True
-                break
-        if not found:
-            missing_cols.append(key)
+        if not dfs:
+            st.stop()
+            
+        master_df = pd.concat(dfs, ignore_index=True)
+        master_df['Mængde'] = 1 # Hver række i filen er 1 pakke
 
-    if missing_cols:
-        st.warning("⚠️ **Vigtigt:** Vi kunne ikke finde alle de nødvendige oplysninger i din fil automatisk.")
-        with st.expander("Klik her for at hjælpe appen med at finde de rigtige kolonner"):
-            for col in missing_cols:
-                mapping[col] = st.selectbox(f"Hvilken kolonne i din fil svarer til '{col}'?", master_df.columns, key=f"map_{col}")
-    
-    # Anvend mapping
-    master_df = master_df.rename(columns={v: k for k, v in mapping.items() if v in master_df.columns})
+        # --- KOLONNE MAPPING (Sikkerhedsventil for sælgere) ---
+        required_cols = {
+            'Land leveringsadresse': ['Land leveringsadresse', 'Country', 'Land'],
+            'Vægt (kg)': ['Vægt (kg)', 'Vægt', 'Weight'],
+            'Aftalepris': ['Aftalepris', 'Pris', 'Price', 'Faktureret beløb'],
+            'Modtagers postnummer': ['Modtagers postnummer', 'Postnummer', 'Zip', 'Zip code'],
+            'Produkt': ['Produkt', 'Product', 'Service']
+        }
+        
+        mapping = {}
+        missing_cols = []
+        
+        for key, alts in required_cols.items():
+            found = False
+            for alt in alts:
+                if alt in master_df.columns:
+                    mapping[key] = alt
+                    found = True
+                    break
+            if not found:
+                missing_cols.append(key)
 
-    # --- DATA RENSNING ---
-    # Fyld standardværdier og rens typer
-    master_df['Land leveringsadresse'] = master_df['Land leveringsadresse'].fillna('UKENDT').astype(str).str.strip().upper()
-    
-    def clean_numeric(val):
-        if pd.isna(val): return 0.0
-        s = str(val).replace(' ', '').replace(',', '.')
-        try: return float(s)
-        except: return 0.0
+        if missing_cols:
+            st.warning("⚠️ **Vigtigt:** Vi kunne ikke finde alle de nødvendige oplysninger i din fil automatisk.")
+            with st.expander("Klik her for at hjælpe appen med at finde de rigtige kolonner"):
+                for col in missing_cols:
+                    mapping[col] = st.selectbox(f"Hvilken kolonne i din fil svarer til '{col}'?", master_df.columns, key=f"map_{col}")
+        
+        # Anvend mapping
+        master_df = master_df.rename(columns={v: k for k, v in mapping.items() if v in master_df.columns})
 
-    master_df['Vægt (kg)'] = master_df['Vægt (kg)'].apply(clean_numeric)
-    master_df['Aftalepris'] = master_df['Aftalepris'].apply(clean_numeric)
-    master_df['Modtagers postnummer'] = master_df['Modtagers postnummer'].fillna('0000').astype(str).str.strip()
-    master_df['Produkt'] = master_df['Produkt'].fillna('Ukendt').astype(str).str.strip()
+        # --- DATA RENSNING ---
+        master_df['Land leveringsadresse'] = master_df['Land leveringsadresse'].fillna('UKENDT').astype(str).str.strip().upper()
+        
+        def clean_numeric(val):
+            if pd.isna(val): return 0.0
+            s = str(val).replace(' ', '').replace(',', '.')
+            try: return float(s)
+            except: return 0.0
 
-    with st.expander("🛠️ Se detaljer om data-rensning"):
-        st.write("Kolonne-mapping anvendt:", mapping)
-        st.success("Data er renset og klar til analyse.")
+        master_df['Vægt (kg)'] = master_df['Vægt (kg)'].apply(clean_numeric)
+        master_df['Aftalepris'] = master_df['Aftalepris'].apply(clean_numeric)
+        master_df['Modtagers postnummer'] = master_df['Modtagers postnummer'].fillna('0000').astype(str).str.strip()
+        master_df['Produkt'] = master_df['Produkt'].fillna('Ukendt').astype(str).str.strip()
 
-    aktive_lande = sorted([l for l in master_df['Land leveringsadresse'].unique().tolist() if l != 'UKENDT' and l != '0.0'])
+        with st.expander("🛠️ Se detaljer om data-rensning"):
+            st.write("Kolonne-mapping anvendt:", mapping)
+            st.success("Data er renset og klar til analyse.")
+
+        aktive_lande = sorted([l for l in master_df['Land leveringsadresse'].unique().tolist() if l != 'UKENDT' and l != '0.0'])
+    else:
+        # Manuel mode
+        aktive_lande = valgte_lande
+        master_df = pd.DataFrame(columns=['Land leveringsadresse', 'Vægt (kg)', 'Aftalepris', 'Modtagers postnummer', 'Produkt', 'Mængde'])
+
     if not aktive_lande:
-        st.warning("Ingen gyldige lande fundet i data (tjek kolonnen 'Land leveringsadresse').")
+        st.warning("Ingen gyldige lande fundet.")
         st.stop()
         
     st.success(f"Fandt data for følgende lande: {', '.join(aktive_lande)}")
     
-    # 2. DYNAMISKE FANER TIL PRIS-EDITERING
-    st.subheader("3. Konfigurer priser pr. land")
+    # 2. DYNAMISKE FANER TIL PRIS-EDITERING OG MANUEL VOLUMEN
+    st.subheader("3. Konfigurer priser og volumen pr. land")
     tabs = st.tabs(aktive_lande)
     
     edited_prices_dict = {}
+    manual_volume_data = [] # Bruges kun hvis data_source er manuel
     
     for i, land in enumerate(aktive_lande):
         with tabs[i]:
@@ -180,12 +195,50 @@ if uploaded_files:
             elif land_code == "FI": services = ["0342 PickUp Parcel Bulk", "FI00", "FI01", "FI02"]
             else: services = ["PickUp Parcel", "Home Delivery", "Business Parcel"]
             
+            # --- PRIS EDITOR ---
+            st.markdown(f"**Priser for {land_code}**")
             if "Enhedspris" in model_type:
                 enhed_df = pd.DataFrame({"Pris pr. pakke (DKK)": [45.0] * len(services)}, index=services)
-                edited_prices_dict[land_code] = st.data_editor(enhed_df, key=f"edit_{land_code}")
+                edited_prices_dict[land_code] = st.data_editor(enhed_df, key=f"edit_p_{land_code}")
             else:
                 matrix_df = pd.DataFrame(45.0, index=services, columns=[f"{w}kg" for w in w_steps])
-                edited_prices_dict[land_code] = st.data_editor(matrix_df, key=f"edit_{land_code}")
+                edited_prices_dict[land_code] = st.data_editor(matrix_df, key=f"edit_p_{land_code}")
+
+            # --- VOLUMEN EDITOR (Kun i manuel mode) ---
+            if data_source == "Manuel Estimering (Indtast volumen)":
+                st.divider()
+                st.markdown(f"**📦 Indtast antal pakker pr. vægtklasse for {land_code}**")
+                vol_matrix = pd.DataFrame(0, index=services, columns=[f"{w}kg" for w in w_steps])
+                edited_vol = st.data_editor(vol_matrix, key=f"edit_v_{land_code}")
+                
+                # Konverter den udfyldte matrix til rækker i master_df format
+                for service in services:
+                    for j, w_col in enumerate(vol_matrix.columns):
+                        # Brug pd.to_numeric for at sikre at linteren er glad
+                        val = edited_vol.loc[service, w_col]
+                        try:
+                            mængde = float(pd.to_numeric(val, errors='coerce'))
+                        except:
+                            mængde = 0.0
+                            
+                        if mængde > 0:
+                            weight_val = w_steps[j]
+                            manual_volume_data.append({
+                                'Land leveringsadresse': land_code,
+                                'Vægt (kg)': weight_val,
+                                'Aftalepris': 0.0,
+                                'Modtagers postnummer': '0000',
+                                'Produkt': service,
+                                'Mængde': mængde
+                            })
+
+    # Hvis vi er i manuel mode, skal vi bygge master_df nu
+    if data_source == "Manuel Estimering (Indtast volumen)":
+        if manual_volume_data:
+            master_df = pd.DataFrame(manual_volume_data)
+        else:
+            st.warning("Indtast venligst nogle pakkemængder i fanerne ovenfor for at se beregningen.")
+            st.stop()
 
     # 3. DEN STORE BEREGNING
     def enrich_and_calculate(row):
@@ -206,105 +259,103 @@ if uploaded_files:
             # Find zone / service navn
             if "Home" in produkt or land_code not in ["DK"]:
                 zone = get_zone(row, land_code)
-                # Tjek om zonen findes i de indtastede priser, ellers brug den første række
                 if zone in pris_tabel.index:
                     service_navn = zone
                 else:
                     service_navn = pris_tabel.index[0] if not pris_tabel.empty else "Standard"
             else:
-                # For DK PickUp logic
                 if "PickUp" in produkt and "PickUp Parcel" in pris_tabel.index:
                     service_navn = "PickUp Parcel"
                 else:
                     service_navn = pris_tabel.index[0] if not pris_tabel.empty else "Standard"
             
-            # Beregn ny pris (hvis vægt og pris > 0)
-            if old_p > 0 and weight > 0:
-                try:
-                    if "Enhedspris" in model_type:
-                        base_val = pris_tabel.loc[service_navn, "Pris pr. pakke (DKK)"]
+            # Beregn ny pris
+            try:
+                if "Enhedspris" in model_type:
+                    base_val = pris_tabel.loc[service_navn, "Pris pr. pakke (DKK)"]
+                else:
+                    prices = pris_tabel.loc[service_navn].values
+                    for i, step in enumerate(w_steps):
+                        if weight <= step: 
+                            base_val = prices[i]
+                            break
                     else:
-                        prices = pris_tabel.loc[service_navn].values
-                        for i, step in enumerate(w_steps):
-                            if weight <= step: 
-                                base_val = prices[i]
-                                break
-                        else:
-                            base_val = prices[-1]
-                    
-                    # Påfør global prisjustering
-                    ny_pris = base_val * (1 + adj_pct / 100)
-                except:
-                    ny_pris = old_p
+                        base_val = prices[-1]
+                
+                ny_pris = base_val * (1 + adj_pct / 100)
+            except:
+                ny_pris = old_p
 
         return pd.Series([ny_pris, service_navn, bracket])
 
     # Tilføj de nye data-kolonner
     master_df[['Ny_Pris', 'Beregnet_Zone', 'Vægtklasse']] = master_df.apply(enrich_and_calculate, axis=1)
-    master_df['Forskel'] = master_df['Ny_Pris'] - master_df['Aftalepris']
-
-    # 4. SAMLET NORDISK DASHBOARD
+    
+    # 4. SAMLET NORDISK DASHBOARD (Vægtet Sum)
     st.divider()
     st.header(f"📊 Samlet Nordisk Resultat ({'+' if vol_adj_pct >= 0 else ''}{vol_adj_pct}% volumen)")
     
-    # Skaleret data
-    total_old = master_df['Aftalepris'].sum() * vol_multiplier
-    total_new = master_df['Ny_Pris'].sum() * vol_multiplier
+    # Vægtet beregning (Pris * Mængde)
+    # Vi bruger pd.to_numeric for at sikre at linteren ikke klager over "complex" typer i unionen
+    total_old = float(pd.to_numeric((master_df['Aftalepris'] * master_df['Mængde']).sum() * vol_multiplier))
+    total_new = float(pd.to_numeric((master_df['Ny_Pris'] * master_df['Mængde']).sum() * vol_multiplier))
     total_diff = total_new - total_old
-    total_count = len(master_df) * vol_multiplier
+    total_count = float(pd.to_numeric(master_df['Mængde'].sum() * vol_multiplier))
     
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Antal Pakker (Est.)", f"{int(total_count):,}")
-    col2.metric("Faktureret (Tidligere)", f"{total_old:,.0f} kr.")
-    col3.metric("Ny Aftale (Est.)", f"{total_new:,.0f} kr.", delta=f"{total_diff:,.0f} kr.", delta_color="inverse")
+    col2.metric("Nuværende Omsætning", f"{total_old:,.0f} kr." if total_old > 0 else "N/A")
+    col3.metric("Ny Aftale (Est.)", f"{total_new:,.0f} kr.", delta=f"{total_diff:,.0f} kr." if total_old > 0 else None, delta_color="inverse")
     
     with col4:
-        if total_diff <= 0:
-            st.success(f"BESPARELSE: {abs((total_diff/total_old)*100 if total_old else 0):.1f}%")
+        if total_old > 0:
+            if total_diff <= 0:
+                st.success(f"BESPARELSE: {abs((total_diff/total_old)*100):.1f}%")
+            else:
+                st.error(f"MEROMKOSTNING: {(total_diff/total_old*100):.1f}%")
         else:
-            st.error(f"MEROMKOSTNING: {((total_diff/total_old)*100 if total_old else 0):.1f}%")
+            st.info("Ingen historisk sammenligning.")
 
     # 5. BREAKDOWN PR. LAND
     st.subheader("Oversigt pr. Land (Skaleret)")
-    # Vi grupperer og skalerer derefter
-    breakdown = master_df.groupby('Land leveringsadresse')[['Aftalepris', 'Ny_Pris']].sum() * vol_multiplier
-    breakdown['Forskel'] = breakdown['Ny_Pris'] - breakdown['Aftalepris']
-    breakdown['Ændring %'] = (breakdown['Forskel'] / breakdown['Aftalepris'] * 100).round(1)
+    master_df['Weighted_Old'] = master_df['Aftalepris'] * master_df['Mængde'] * vol_multiplier
+    master_df['Weighted_New'] = master_df['Ny_Pris'] * master_df['Mængde'] * vol_multiplier
+    
+    breakdown = master_df.groupby('Land leveringsadresse').agg({
+        'Weighted_Old': 'sum',
+        'Weighted_New': 'sum'
+    }).rename(columns={'Weighted_Old': 'Nuværende', 'Weighted_New': 'Ny Pris'})
+    breakdown['Forskel'] = breakdown['Ny Pris'] - breakdown['Nuværende']
     st.dataframe(breakdown.style.format("{:,.0f}"), use_container_width=True)
     
-    # 6. PAKKEFORDELING (HEATMAP) - DET NYE MODUL!
+    # 6. PAKKEFORDELING (HEATMAP)
     st.divider()
     st.subheader("📦 Pakkeprofil (Antal pakker pr. Zone og Vægtklasse)")
-    st.markdown("Her kan du se præcis hvor kundens pakker ligger. Det gør det nemmere at målrette rabatter i forhandlingen.")
-    
-    # Vi laver et filter, så man kan se et land ad gangen, da de har forskellige zoner og vægtklasser
     valgt_land_oversigt = st.selectbox("Vælg land til pakkeprofil:", aktive_lande)
-    
     df_land = master_df[master_df['Land leveringsadresse'] == valgt_land_oversigt]
     
-    # Skab en krydstabel (Pivot) der tæller antallet af forsendelser og skalerer med volumen
-    pivot_table = pd.crosstab(
-        index=df_land['Beregnet_Zone'], 
-        columns=df_land['Vægtklasse'], 
+    pivot_table = pd.pivot_table(
+        df_land, 
+        values='Mængde', 
+        index='Beregnet_Zone', 
+        columns='Vægtklasse', 
+        aggfunc='sum', 
+        fill_value=0,
         margins=True, 
         margins_name="Total"
     )
     
-    # Sorter kolonner numerisk (undtagen 'Total')
     cols = [c for c in pivot_table.columns if c != 'Total']
-    # En simpel sorteringsnøgle der kigger på det første tal i strengen "X-Y kg"
     def weight_sort_key(s):
         if '>' in s: return 999
         try: return float(s.split('-')[0])
         except: return 0
-    
     sorted_cols = sorted(cols, key=weight_sort_key) + ['Total']
     pivot_table = pivot_table[sorted_cols]
     
-    # Skalering og pæn formatering
     pivot_table = (pivot_table * vol_multiplier).round(0).astype(int)
-    
     st.dataframe(pivot_table.style.background_gradient(cmap='Blues', axis=None), use_container_width=True)
+
 
     # 7. EKSPORT TIL EXCEL
     st.divider()
