@@ -149,7 +149,7 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
         master_df = master_df.rename(columns={v: k for k, v in mapping.items() if v in master_df.columns})
 
         # --- DATA RENSNING ---
-        master_df['Land leveringsadresse'] = master_df['Land leveringsadresse'].fillna('UKENDT').astype(str).str.strip().upper()
+        master_df['Land leveringsadresse'] = master_df['Land leveringsadresse'].fillna('UKENDT').astype(str).str.strip().str.upper()
         
         def clean_numeric(val):
             if pd.isna(val): return 0.0
