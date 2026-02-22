@@ -47,17 +47,49 @@ with st.sidebar:
         "2. Vælg Prismodel",
         ["Enhedspris (Fast pris)", "Vægtbaseret pris (Matrix)"]
     )
+    
+    st.divider()
+    st.header("📈 Forhandling & Justering")
+    adj_pct = st.slider(
+        "Generel prisjustering (%)",
+        min_value=-20.0,
+        max_value=40.0,
+        value=0.0,
+        step=0.5,
+        help="Simuler en prisstigning eller nedsættelse på tværs af alle priser."
+    )
+    st.info(f"Alle priser i tabellerne herunder ganges med {1 + adj_pct/100:.3f}")
 
 # --- HOVEDPROGRAM ---
 if uploaded_files:
     # 1. Saml alle uploadede filer
     dfs = []
     for f in uploaded_files:
-        dfs.append(pd.read_csv(f))
+        temp_df = pd.read_csv(f)
+        # Rens kolonnenavne (fjern mellemrum)
+        temp_df.columns = [c.strip() for c in temp_df.columns]
+        dfs.append(temp_df)
+    
     master_df = pd.concat(dfs, ignore_index=True)
     
+    # --- DATA RENSNING ---
+    with st.expander("🛠️ Se data-rensning (håndtering af tomme celler)"):
+        missing_report = master_df.isna().sum()
+        st.write("Fundne tomme celler pr. kolonne:", missing_report[missing_report > 0])
+        
+        # Fyld standardværdier
+        master_df['Land leveringsadresse'] = master_df['Land leveringsadresse'].fillna('UKENDT').astype(str).str.strip().upper()
+        master_df['Vægt (kg)'] = pd.to_numeric(master_df['Vægt (kg)'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+        master_df['Aftalepris'] = pd.to_numeric(master_df['Aftalepris'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+        master_df['Modtagers postnummer'] = master_df['Modtagers postnummer'].fillna('0000').astype(str).str.strip()
+        master_df['Produkt'] = master_df['Produkt'].fillna('Ukendt').astype(str).str.strip()
+        
+        st.success("Data er renset og klar til analyse.")
+
     if 'Land leveringsadresse' in master_df.columns:
-        aktive_lande = master_df['Land leveringsadresse'].dropna().unique().tolist()
+        aktive_lande = master_df['Land leveringsadresse'].unique().tolist()
+        # Fjern 'UKENDT' fra aktive lande hvis vi ikke vil konfigurere priser for det
+        if 'UKENDT' in aktive_lande: aktive_lande.remove('UKENDT')
     else:
         st.error("Kunne ikke finde kolonnen 'Land leveringsadresse'. Tjek formatet.")
         st.stop()
@@ -114,15 +146,18 @@ if uploaded_files:
             if old_p > 0 and weight > 0:
                 try:
                     if "Enhedspris" in model_type:
-                        ny_pris = pris_tabel.loc[service_navn, "Pris pr. pakke (DKK)"]
+                        base_val = pris_tabel.loc[service_navn, "Pris pr. pakke (DKK)"]
                     else:
                         prices = pris_tabel.loc[service_navn].values
                         for i, step in enumerate(w_steps):
                             if weight <= step: 
-                                ny_pris = prices[i]
+                                base_val = prices[i]
                                 break
                         else:
-                            ny_pris = prices[-1]
+                            base_val = prices[-1]
+                    
+                    # Påfør global prisjustering
+                    ny_pris = base_val * (1 + adj_pct / 100)
                 except:
                     ny_pris = old_p
 
