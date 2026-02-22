@@ -262,9 +262,21 @@ if uploaded_files:
     st.subheader("📥 Generer Rapport")
     st.markdown("Hent en komplet Excel-rapport til kunden eller internt brug.")
     
+    # Sikkerheds-rensning for at undgå Excel Injection
+    def sanitize_for_excel(df):
+        # Vi laver en kopi for ikke at ændre i den aktive dataframe i UI'en
+        clean_df = df.copy()
+        for col in clean_df.select_dtypes(include=['object']):
+            # Celler der starter med =, +, - eller @ kan trigge formler i Excel
+            clean_df[col] = clean_df[col].apply(lambda x: f"'{x}" if str(x).startswith(('=', '+', '-', '@')) else x)
+        return clean_df
+
     # Funktion til at skabe Excel-fil i hukommelsen
     def create_excel_report(df, breakdown_df, settings):
         output = io.BytesIO()
+        # Rens data før eksport
+        safe_df = sanitize_for_excel(df)
+        
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             # Ark 1: Dashboard / Indstillinger
             settings_df = pd.DataFrame([settings])
