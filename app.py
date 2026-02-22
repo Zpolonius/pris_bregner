@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import io
 
 # --- KONFIGURATION (Zoner & Vægttrin) ---
 PRIS_STEPS = {
@@ -229,9 +230,44 @@ if uploaded_files:
     
     st.dataframe(pivot_table.style.background_gradient(cmap='Blues', axis=None), use_container_width=True)
 
-    # 7. DOWNLOAD
+    # 7. EKSPORT TIL EXCEL
     st.divider()
-    st.download_button("📥 Hent samlet Excel-rapport for Norden", master_df.to_csv(index=False), "Bring_Nordic_Total.csv", "text/csv")
+    st.subheader("📥 Generer Rapport")
+    st.markdown("Hent en komplet Excel-rapport til kunden eller internt brug.")
+    
+    # Funktion til at skabe Excel-fil i hukommelsen
+    def create_excel_report(df, breakdown_df, settings):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Ark 1: Dashboard / Indstillinger
+            settings_df = pd.DataFrame([settings])
+            settings_df.to_excel(writer, sheet_name='Dashboard', index=False)
+            
+            # Ark 2: Oversigt pr. Land
+            breakdown_df.to_excel(writer, sheet_name='Land Oversigt')
+            
+            # Ark 3: Detaljeret Data
+            df.to_excel(writer, sheet_name='Data Grundlag', index=False)
+            
+        return output.getvalue()
+
+    settings_summary = {
+        "Simuleret af": "Bring Nordic Master-Beregner",
+        "Prismodel": model_type,
+        "Global Prisjustering (%)": adj_pct,
+        "Volumen-vækst (%)": vol_adj_pct,
+        "Antal Pakker (Est.)": int(total_count),
+        "Samlet Besparelse (%)": f"{(total_diff/total_old*100):.1f}%" if total_old else "0%"
+    }
+
+    excel_data = create_excel_report(master_df, breakdown, settings_summary)
+    
+    st.download_button(
+        label="📥 Hent komplet Excel-rapport (.xlsx)",
+        data=excel_data,
+        file_name=f"Bring_Nordic_Analyse_{valgt_land_oversigt}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 else:
     st.info("👈 Upload en eller flere filer for at starte (f.eks. både SE, NO og FI).")
