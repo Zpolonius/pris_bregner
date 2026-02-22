@@ -33,13 +33,20 @@ def get_weight_bracket(weight, w_steps):
         prev = step
     return f">{w_steps[-1]} kg"
 
-st.set_page_config(page_title="Bring Nordic Master", layout="wide", page_icon="🌍")
+st.set_page_config(page_title="Bring Nordic Master", layout="wide", page_icon="logo/favicon.ico")
 
-st.title("🌍 Bring Nordic Master-Beregner")
-st.markdown("Upload én stor nordisk fil, eller flere filer (én pr. land). Værktøjet samler det hele automatisk.")
+# --- LOGO & TITEL ---
+col_logo, col_title = st.columns([1, 4])
+with col_logo:
+    st.image("logo/bring_new_logo.png", width=150)
+
+with col_title:
+    st.title("🌍 Bring Nordic Master-Beregner")
+    st.markdown("*Det ultimative salgsværktøj til nordiske fragtsimuleringer.*")
 
 # --- SIDEBAR ---
 with st.sidebar:
+    st.image("logo/bring_new_logo.png", width=200)
     st.header("1. Upload Data")
     uploaded_files = st.file_uploader("Upload CSV eller Excel-rapporter", type=["csv", "xlsx", "xls"], accept_multiple_files=True)
     
