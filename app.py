@@ -216,7 +216,7 @@ if uploaded_files:
     
     df_land = master_df[master_df['Land leveringsadresse'] == valgt_land_oversigt]
     
-    # Skab en krydstabel (Pivot) der tæller antallet af forsendelser
+    # Skab en krydstabel (Pivot) der tæller antallet af forsendelser og skalerer med volumen
     pivot_table = pd.crosstab(
         index=df_land['Beregnet_Zone'], 
         columns=df_land['Vægtklasse'], 
@@ -224,7 +224,9 @@ if uploaded_files:
         margins_name="Total"
     )
     
-    # Sørg for at sortere kolonnerne pænt efter vægt (kræver lidt custom sortering, men vi bruger default for nu)
+    # Skalering og pæn formatering
+    pivot_table = (pivot_table * vol_multiplier).round(0).astype(int)
+    
     st.dataframe(pivot_table.style.background_gradient(cmap='Blues', axis=None), use_container_width=True)
 
     # 7. DOWNLOAD
