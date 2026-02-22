@@ -1,0 +1,14 @@
+Sendingsnummer,Modtagers postnummer,Produkt,Vægt (kg),Aftalepris,Land leveringsadresse
+TEST001,8000,PickUp Parcel Bulk,2.5,30.00,DK
+TEST002,2200,Home Delivery Parcel,12.0,40.00,DK
+TEST003,5000,Business Parcel Bulk,0.0,5.50,DK
+TEST004,10500,Home Delivery Parcel,5.0,65.00,SE
+TEST005,40200,Home Delivery Parcel,15.0,80.00,SE
+TEST006,90100,0342 PickUp Parcel Bulk,2.0,26.00,SE
+TEST007,0150,Home Delivery Parcel,4.0,95.00,NO
+TEST008,2050,Home Delivery Parcel,18.0,150.00,NO
+TEST009,4000,0332 Business Parcel Bulk,0.0,0.00,NO
+TEST010,00100,Home Delivery Parcel,8.0,65.00,FI
+TEST011,45100,0342 PickUp Parcel Bulk,1.0,25.00,FI
+TEST012,80100,Home Delivery Parcel,25.0,120.00,FI
+TEST013,10500,Toldgebyr (Info-linje),0.0,0.00,SE
