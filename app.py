@@ -58,7 +58,17 @@ with st.sidebar:
         step=0.5,
         help="Simuler en prisstigning eller nedsættelse på tværs af alle priser."
     )
-    st.info(f"Alle priser i tabellerne herunder ganges med {1 + adj_pct/100:.3f}")
+    vol_adj_pct = st.slider(
+        "Forventet volumen-vækst (%)",
+        min_value=-50.0,
+        max_value=200.0,
+        value=0.0,
+        step=5.0,
+        help="Simuler hvad der sker hvis kunden øger eller sænker deres pakkemængde."
+    )
+    
+    vol_multiplier = 1 + vol_adj_pct / 100
+    st.info(f"Beregninger baseres på {vol_multiplier:.2f}x nuværende volumen.")
 
 # --- HOVEDPROGRAM ---
 if uploaded_files:
@@ -169,28 +179,32 @@ if uploaded_files:
 
     # 4. SAMLET NORDISK DASHBOARD
     st.divider()
-    st.header("📊 Samlet Nordisk Resultat")
+    st.header(f"📊 Samlet Nordisk Resultat ({'+' if vol_adj_pct >= 0 else ''}{vol_adj_pct}% volumen)")
     
-    total_old = master_df['Aftalepris'].sum()
-    total_new = master_df['Ny_Pris'].sum()
+    # Skaleret data
+    total_old = master_df['Aftalepris'].sum() * vol_multiplier
+    total_new = master_df['Ny_Pris'].sum() * vol_multiplier
     total_diff = total_new - total_old
+    total_count = len(master_df) * vol_multiplier
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Samlet Faktureret (Tidligere)", f"{total_old:,.2f} kr.")
-    col2.metric("Samlet Ny Aftale", f"{total_new:,.2f} kr.", delta=f"{total_diff:,.2f} kr.", delta_color="inverse")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Antal Pakker (Est.)", f"{int(total_count):,}")
+    col2.metric("Faktureret (Tidligere)", f"{total_old:,.0f} kr.")
+    col3.metric("Ny Aftale (Est.)", f"{total_new:,.0f} kr.", delta=f"{total_diff:,.0f} kr.", delta_color="inverse")
     
-    with col3:
+    with col4:
         if total_diff <= 0:
-            st.success(f"SAMLET BESPARELSE: {abs((total_diff/total_old)*100 if total_old else 0):.1f}%")
+            st.success(f"BESPARELSE: {abs((total_diff/total_old)*100 if total_old else 0):.1f}%")
         else:
-            st.error(f"SAMLET MEROMKOSTNING: {((total_diff/total_old)*100 if total_old else 0):.1f}%")
+            st.error(f"MEROMKOSTNING: {((total_diff/total_old)*100 if total_old else 0):.1f}%")
 
     # 5. BREAKDOWN PR. LAND
-    st.subheader("Oversigt pr. Land")
-    breakdown = master_df.groupby('Land leveringsadresse')[['Aftalepris', 'Ny_Pris']].sum()
+    st.subheader("Oversigt pr. Land (Skaleret)")
+    # Vi grupperer og skalerer derefter
+    breakdown = master_df.groupby('Land leveringsadresse')[['Aftalepris', 'Ny_Pris']].sum() * vol_multiplier
     breakdown['Forskel'] = breakdown['Ny_Pris'] - breakdown['Aftalepris']
     breakdown['Ændring %'] = (breakdown['Forskel'] / breakdown['Aftalepris'] * 100).round(1)
-    st.dataframe(breakdown.style.format("{:.2f}"), use_container_width=True)
+    st.dataframe(breakdown.style.format("{:,.0f}"), use_container_width=True)
     
     # 6. PAKKEFORDELING (HEATMAP) - DET NYE MODUL!
     st.divider()
