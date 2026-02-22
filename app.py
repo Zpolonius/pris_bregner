@@ -78,17 +78,6 @@ with st.sidebar:
     vol_multiplier = 1 + vol_adj_pct / 100
     st.info(f"Beregninger baseres på {vol_multiplier:.2f}x nuværende volumen.")
 
-    st.divider()
-    st.header("💱 Valuta & Tillæg")
-    st.markdown("Normaliser til DKK for samlet overblik:")
-    col_v1, col_v2 = st.columns(2)
-    with col_v1:
-        rate_sek = st.number_input("SEK -> DKK", value=0.64, step=0.01)
-        rate_nok = st.number_input("NOK -> DKK", value=0.63, step=0.01)
-    with col_v2:
-        rate_eur = st.number_input("EUR -> DKK", value=7.46, step=0.01)
-        dmt_pct = st.number_input("DMT Tillæg (%)", value=0.0, step=0.1, help="Tilføj estimeret drivmiddeltillæg til de nye priser.")
-
 # --- HOVEDPROGRAM ---
 if uploaded_files:
     # 1. Saml alle uploadede filer
@@ -219,29 +208,13 @@ if uploaded_files:
                     
                     # Påfør global prisjustering
                     ny_pris = base_val * (1 + adj_pct / 100)
-                    
-                    # Påfør DMT
-                    ny_pris = ny_pris * (1 + dmt_pct / 100)
-                    
-                    # --- VALUTA NORMALISERING ---
-                    # Vi konverterer alt til DKK baseret på landekoden
-                    if land_code == "SE": 
-                        ny_pris = ny_pris * rate_sek
-                        old_p = old_p * rate_sek
-                    elif land_code == "NO":
-                        ny_pris = ny_pris * rate_nok
-                        old_p = old_p * rate_nok
-                    elif land_code == "FI":
-                        ny_pris = ny_pris * rate_eur
-                        old_p = old_p * rate_eur
                 except:
                     ny_pris = old_p
 
-        return pd.Series([ny_pris, service_navn, bracket, old_p])
+        return pd.Series([ny_pris, service_navn, bracket])
 
-    # Tilføj de nye data-kolonner (vi overskriver Aftalepris med den normaliserede værdi)
-    master_df[['Ny_Pris', 'Beregnet_Zone', 'Vægtklasse', 'Aftalepris_DKK']] = master_df.apply(enrich_and_calculate, axis=1)
-    master_df['Aftalepris'] = master_df['Aftalepris_DKK'] # Brug den normaliserede pris til alle totaler
+    # Tilføj de nye data-kolonner
+    master_df[['Ny_Pris', 'Beregnet_Zone', 'Vægtklasse']] = master_df.apply(enrich_and_calculate, axis=1)
     master_df['Forskel'] = master_df['Ny_Pris'] - master_df['Aftalepris']
 
     # 4. SAMLET NORDISK DASHBOARD
