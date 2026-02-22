@@ -85,13 +85,9 @@ if uploaded_files:
     for f in uploaded_files:
         try:
             if f.name.endswith('.csv'):
-                # Prøv med automatisk separator-detektion og håndtering af encoding
                 temp_df = pd.read_csv(f, sep=None, engine='python', encoding_errors='replace')
             else:
-                # Indlæs Excel (bruger første fane som standard)
                 temp_df = pd.read_excel(f)
-                
-            # Rens kolonnenavne (fjern mellemrum og uønskede tegn)
             temp_df.columns = [str(c).strip() for c in temp_df.columns]
             dfs.append(temp_df)
         except Exception as e:
@@ -102,12 +98,38 @@ if uploaded_files:
         
     master_df = pd.concat(dfs, ignore_index=True)
     
-    # --- DATA RENSNING (Flyttet op for at sikre kolonner) ---
-    relevante_kolonner = ['Land leveringsadresse', 'Vægt (kg)', 'Aftalepris', 'Modtagers postnummer', 'Produkt']
-    for col in relevante_kolonner:
-        if col not in master_df.columns:
-            master_df[col] = 0.0 if col in ['Vægt (kg)', 'Aftalepris'] else "UKENDT"
+    # --- KOLONNE MAPPING (Sikkerhedsventil for sælgere) ---
+    required_cols = {
+        'Land leveringsadresse': ['Land leveringsadresse', 'Country', 'Land'],
+        'Vægt (kg)': ['Vægt (kg)', 'Vægt', 'Weight'],
+        'Aftalepris': ['Aftalepris', 'Pris', 'Price', 'Faktureret beløb'],
+        'Modtagers postnummer': ['Modtagers postnummer', 'Postnummer', 'Zip', 'Zip code'],
+        'Produkt': ['Produkt', 'Product', 'Service']
+    }
+    
+    mapping = {}
+    missing_cols = []
+    
+    for key, alts in required_cols.items():
+        found = False
+        for alt in alts:
+            if alt in master_df.columns:
+                mapping[key] = alt
+                found = True
+                break
+        if not found:
+            missing_cols.append(key)
 
+    if missing_cols:
+        st.warning("⚠️ **Vigtigt:** Vi kunne ikke finde alle de nødvendige oplysninger i din fil automatisk.")
+        with st.expander("Klik her for at hjælpe appen med at finde de rigtige kolonner"):
+            for col in missing_cols:
+                mapping[col] = st.selectbox(f"Hvilken kolonne i din fil svarer til '{col}'?", master_df.columns, key=f"map_{col}")
+    
+    # Anvend mapping
+    master_df = master_df.rename(columns={v: k for k, v in mapping.items() if v in master_df.columns})
+
+    # --- DATA RENSNING ---
     # Fyld standardværdier og rens typer
     master_df['Land leveringsadresse'] = master_df['Land leveringsadresse'].fillna('UKENDT').astype(str).str.strip().upper()
     
@@ -122,12 +144,11 @@ if uploaded_files:
     master_df['Modtagers postnummer'] = master_df['Modtagers postnummer'].fillna('0000').astype(str).str.strip()
     master_df['Produkt'] = master_df['Produkt'].fillna('Ukendt').astype(str).str.strip()
 
-    with st.expander("🛠️ Se data-rensning (håndtering af tomme celler)"):
-        missing_report = master_df[relevante_kolonner].isna().sum()
-        st.write("Udfyldte manglende værdier i følgende kolonner:", missing_report[missing_report == 0].index.tolist())
+    with st.expander("🛠️ Se detaljer om data-rensning"):
+        st.write("Kolonne-mapping anvendt:", mapping)
         st.success("Data er renset og klar til analyse.")
 
-    aktive_lande = sorted([l for l in master_df['Land leveringsadresse'].unique().tolist() if l != 'UKENDT'])
+    aktive_lande = sorted([l for l in master_df['Land leveringsadresse'].unique().tolist() if l != 'UKENDT' and l != '0.0'])
     if not aktive_lande:
         st.warning("Ingen gyldige lande fundet i data (tjek kolonnen 'Land leveringsadresse').")
         st.stop()
