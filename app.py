@@ -76,31 +76,50 @@ if uploaded_files:
     # 1. Saml alle uploadede filer
     dfs = []
     for f in uploaded_files:
-        temp_df = pd.read_csv(f)
-        # Rens kolonnenavne (fjern mellemrum)
-        temp_df.columns = [c.strip() for c in temp_df.columns]
-        dfs.append(temp_df)
+        try:
+            # Prøv med automatisk separator-detektion og håndtering af encoding
+            temp_df = pd.read_csv(f, sep=None, engine='python', encoding_errors='replace')
+            # Rens kolonnenavne (fjern mellemrum og uønskede tegn)
+            temp_df.columns = [c.strip() for c in temp_df.columns]
+            dfs.append(temp_df)
+        except Exception as e:
+            st.error(f"Fejl ved indlæsning af {f.name}: {e}")
     
+    if not dfs:
+        st.stop()
+        
     master_df = pd.concat(dfs, ignore_index=True)
     
     # --- DATA RENSNING ---
     with st.expander("🛠️ Se data-rensning (håndtering af tomme celler)"):
-        missing_report = master_df.isna().sum()
+        # Vi fokuserer kun på de kolonner vi rent faktisk bruger
+        relevante_kolonner = ['Land leveringsadresse', 'Vægt (kg)', 'Aftalepris', 'Modtagers postnummer', 'Produkt']
+        for col in relevante_kolonner:
+            if col not in master_df.columns:
+                master_df[col] = 0 if col in ['Vægt (kg)', 'Aftalepris'] else "UKENDT"
+
+        missing_report = master_df[relevante_kolonner].isna().sum()
         st.write("Fundne tomme celler pr. kolonne:", missing_report[missing_report > 0])
         
-        # Fyld standardværdier
+        # Fyld standardværdier og rens typer
         master_df['Land leveringsadresse'] = master_df['Land leveringsadresse'].fillna('UKENDT').astype(str).str.strip().upper()
-        master_df['Vægt (kg)'] = pd.to_numeric(master_df['Vægt (kg)'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
-        master_df['Aftalepris'] = pd.to_numeric(master_df['Aftalepris'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+        
+        # Stærk tal-konvertering
+        def clean_numeric(val):
+            if pd.isna(val): return 0.0
+            s = str(val).replace(' ', '').replace(',', '.')
+            try: return float(s)
+            except: return 0.0
+
+        master_df['Vægt (kg)'] = master_df['Vægt (kg)'].apply(clean_numeric)
+        master_df['Aftalepris'] = master_df['Aftalepris'].apply(clean_numeric)
         master_df['Modtagers postnummer'] = master_df['Modtagers postnummer'].fillna('0000').astype(str).str.strip()
         master_df['Produkt'] = master_df['Produkt'].fillna('Ukendt').astype(str).str.strip()
         
         st.success("Data er renset og klar til analyse.")
 
     if 'Land leveringsadresse' in master_df.columns:
-        aktive_lande = master_df['Land leveringsadresse'].unique().tolist()
-        # Fjern 'UKENDT' fra aktive lande hvis vi ikke vil konfigurere priser for det
-        if 'UKENDT' in aktive_lande: aktive_lande.remove('UKENDT')
+        aktive_lande = sorted([l for l in master_df['Land leveringsadresse'].unique().tolist() if l != 'UKENDT'])
     else:
         st.error("Kunne ikke finde kolonnen 'Land leveringsadresse'. Tjek formatet.")
         st.stop()
@@ -149,9 +168,17 @@ if uploaded_files:
             # Find zone / service navn
             if "Home" in produkt or land_code not in ["DK"]:
                 zone = get_zone(row, land_code)
-                service_navn = zone if zone in pris_tabel.index else pris_tabel.index[0]
+                # Tjek om zonen findes i de indtastede priser, ellers brug den første række
+                if zone in pris_tabel.index:
+                    service_navn = zone
+                else:
+                    service_navn = pris_tabel.index[0] if not pris_tabel.empty else "Standard"
             else:
-                service_navn = "PickUp Parcel" if "PickUp" in produkt else pris_tabel.index[0]
+                # For DK PickUp logic
+                if "PickUp" in produkt and "PickUp Parcel" in pris_tabel.index:
+                    service_navn = "PickUp Parcel"
+                else:
+                    service_navn = pris_tabel.index[0] if not pris_tabel.empty else "Standard"
             
             # Beregn ny pris (hvis vægt og pris > 0)
             if old_p > 0 and weight > 0:
