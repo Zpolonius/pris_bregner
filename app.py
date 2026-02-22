@@ -218,10 +218,14 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
             land_code = land.upper().strip()
             w_steps = PRIS_STEPS.get(land_code, PRIS_STEPS["DK"])
             
-            if land_code == "SE": services = ["0342 PickUp Parcel Bulk", "CITY-1", "CITY-2", "SOUTH-2"]
-            elif land_code == "NO": services = ["0342 PickUp Parcel Bulk", "OSL", "NOR2", "NOR3"]
-            elif land_code == "FI": services = ["0342 PickUp Parcel Bulk", "FI00", "FI01", "FI02"]
-            else: services = ["PickUp Parcel", "Home Delivery", "Business Parcel"]
+            if land_code == "SE": 
+                services = ["0342 PickUp Parcel Bulk", "CITY-1", "CITY-2", "SOUTH-2"]
+            elif land_code == "NO": 
+                services = ["0342 PickUp Parcel Bulk", "OSL", "NOR2", "NOR3", "NOR4", "NORS"]
+            elif land_code == "FI": 
+                services = ["0342 PickUp Parcel Bulk", "FI00", "FI01", "FI02", "FI04"]
+            else: 
+                services = ["PickUp Parcel", "Home Delivery", "Business Parcel"]
             
             # --- PRIS EDITOR ---
             st.markdown(f"**Priser for {land_code}**")
@@ -284,31 +288,32 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
             pris_tabel = edited_prices_dict[land_code]
             w_steps = PRIS_STEPS.get(land_code, PRIS_STEPS["DK"])
             
-            # Find zone / service navn
-            if "Home" in produkt or land_code not in ["DK"]:
-                zone = get_zone(row, land_code)
-                if zone in pris_tabel.index:
-                    service_navn = zone
-                else:
-                    service_navn = pris_tabel.index[0] if not pris_tabel.empty else "Standard"
+            # Find zone / service navn (Prioriter zone match)
+            zone = get_zone(row, land_code)
+            
+            if zone in pris_tabel.index:
+                service_navn = zone
+            elif "PickUp" in produkt and "0342 PickUp Parcel Bulk" in pris_tabel.index:
+                service_navn = "0342 PickUp Parcel Bulk"
+            elif "PickUp" in produkt and "PickUp Parcel" in pris_tabel.index:
+                service_navn = "PickUp Parcel"
             else:
-                if "PickUp" in produkt and "PickUp Parcel" in pris_tabel.index:
-                    service_navn = "PickUp Parcel"
-                else:
-                    service_navn = pris_tabel.index[0] if not pris_tabel.empty else "Standard"
+                service_navn = pris_tabel.index[0] if not pris_tabel.empty else "Standard"
             
             # Beregn ny pris
             try:
                 if "Enhedspris" in model_type:
-                    base_val = pris_tabel.loc[service_navn, "Pris pr. pakke (DKK)"]
+                    # Find den rigtige kolonne (nogle gange 'Pris pr. pakke (DKK)', andre gange 'Pris pr. pakke')
+                    col = pris_tabel.columns[0]
+                    base_val = float(pris_tabel.loc[service_navn, col])
                 else:
                     prices = pris_tabel.loc[service_navn].values
                     for i, step in enumerate(w_steps):
                         if weight <= step: 
-                            base_val = prices[i]
+                            base_val = float(prices[i])
                             break
                     else:
-                        base_val = prices[-1]
+                        base_val = float(prices[-1])
                 
                 ny_pris = base_val * (1 + adj_pct / 100)
             except:
