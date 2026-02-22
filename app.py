@@ -41,7 +41,7 @@ st.markdown("Upload én stor nordisk fil, eller flere filer (én pr. land). Vær
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("1. Upload Data")
-    uploaded_files = st.file_uploader("Upload CSV-rapporter", type="csv", accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload CSV eller Excel-rapporter", type=["csv", "xlsx", "xls"], accept_multiple_files=True)
     
     st.divider()
     model_type = st.radio(
@@ -77,10 +77,15 @@ if uploaded_files:
     dfs = []
     for f in uploaded_files:
         try:
-            # Prøv med automatisk separator-detektion og håndtering af encoding
-            temp_df = pd.read_csv(f, sep=None, engine='python', encoding_errors='replace')
+            if f.name.endswith('.csv'):
+                # Prøv med automatisk separator-detektion og håndtering af encoding
+                temp_df = pd.read_csv(f, sep=None, engine='python', encoding_errors='replace')
+            else:
+                # Indlæs Excel (bruger første fane som standard)
+                temp_df = pd.read_excel(f)
+                
             # Rens kolonnenavne (fjern mellemrum og uønskede tegn)
-            temp_df.columns = [c.strip() for c in temp_df.columns]
+            temp_df.columns = [str(c).strip() for c in temp_df.columns]
             dfs.append(temp_df)
         except Exception as e:
             st.error(f"Fejl ved indlæsning af {f.name}: {e}")
