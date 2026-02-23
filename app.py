@@ -217,6 +217,26 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
                 st.success("Data er renset og klar til analyse.")
 
             aktive_lande = sorted([l for l in master_df['Land leveringsadresse'].unique().tolist() if l != 'UKENDT' and l != '0.0'])
+            
+            # --- PRÆ-BEREGNING (OPTIMERING TIL STORE FILER) ---
+            with st.spinner("Præ-beregner zoner og vægtklasser for hurtig redigering..."):
+                def get_weight_index(row, country_steps):
+                    w = row.get('Vægt (kg)', 0)
+                    if w == 0: return -1 # Gebyr
+                    for idx, step in enumerate(country_steps):
+                        if w <= step: return idx
+                    return len(country_steps) - 1 # Max trin
+
+                # Vi gemmer de rå indeks og zoner én gang for alle
+                master_df['_Zone'] = master_df.apply(lambda r: get_zone(r, r['Land leveringsadresse']), axis=1)
+                
+                # Vægt-indeks pr. land (vi mapper den rigtige liste af steps)
+                def map_w_idx(row):
+                    steps = PRIS_STEPS.get(row['Land leveringsadresse'], PRIS_STEPS["DK"])
+                    return get_weight_index(row, steps)
+                
+                master_df['_W_Idx'] = master_df.apply(map_w_idx, axis=1)
+                master_df['Vægtklasse'] = master_df.apply(lambda r: get_weight_bracket(r['Vægt (kg)'], PRIS_STEPS.get(r['Land leveringsadresse'], PRIS_STEPS["DK"])), axis=1)
     else:
         # Manuel mode
         aktive_lande = valgte_lande
@@ -283,7 +303,10 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
                                 'Aftalepris': 0.0,
                                 'Modtagers postnummer': '0000',
                                 'Produkt': service,
-                                'Mængde': mængde
+                                'Mængde': mængde,
+                                '_Zone': service, # I manuel mode er servicen selve zonen
+                                '_W_Idx': j,      # Vi kender indekset direkte fra kolonnen
+                                'Vægtklasse': w_col
                             })
 
     # Hvis vi er i manuel mode, skal vi bygge master_df nu
@@ -294,65 +317,91 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
             st.warning("Indtast venligst nogle pakkemængder i fanerne ovenfor for at se beregningen.")
             st.stop()
 
-    # 3. DEN STORE BEREGNING
-    def enrich_and_calculate(row):
-        land_code = str(row.get('Land leveringsadresse', '')).upper().strip()
-        old_p = row.get('Aftalepris', 0)
-        weight = row.get('Vægt (kg)', 0)
-        produkt = str(row.get('Produkt', ''))
+    # 3. DEN STORE BEREGNING (OPTIMERET & VEKTORISERET)
+    def calculate_results(df, prices_dict):
+        if df is None: return None
         
-        # Standardværdier hvis filen ikke matcher
-        ny_pris = old_p
-        service_navn = "Ukendt"
-        bracket = get_weight_bracket(weight, PRIS_STEPS.get(land_code, PRIS_STEPS["DK"]))
-        
-        if land_code in edited_prices_dict:
-            pris_tabel = edited_prices_dict[land_code]
-            w_steps = PRIS_STEPS.get(land_code, PRIS_STEPS["DK"])
-            
-            # Find zone / service navn (Prioriter zone match)
-            zone = get_zone(row, land_code)
-            
-            if zone in pris_tabel.index:
-                service_navn = zone
-            elif "PickUp" in produkt and "0342 PickUp Parcel Bulk" in pris_tabel.index:
-                service_navn = "0342 PickUp Parcel Bulk"
-            elif "PickUp" in produkt and "PickUp Parcel" in pris_tabel.index:
-                service_navn = "PickUp Parcel"
-            else:
-                service_navn = pris_tabel.index[0] if not pris_tabel.empty else "Standard"
-            
-            # Beregn ny pris
-            try:
-                if "Enhedspris" in model_type:
-                    # Find den rigtige kolonne (nogle gange 'Pris pr. pakke (DKK)', andre gange 'Pris pr. pakke')
-                    col = pris_tabel.columns[0]
-                    base_val = float(pris_tabel.loc[service_navn, col])
-                else:
-                    prices = pris_tabel.loc[service_navn].values
-                    for i, step in enumerate(w_steps):
-                        if weight <= step: 
-                            base_val = float(prices[i])
-                            break
-                    else:
-                        base_val = float(prices[-1])
+        with st.spinner("Beregner nye priser... En krone her, en krone der..."):
+            # Vi bruger de præ-beregnede zoner og indekser
+            def get_price(row):
+                land_code = row['Land leveringsadresse']
+                old_p = row['Aftalepris']
+                w_idx = int(row['_W_Idx'])
+                zone = row['_Zone']
+                produkt = row['Produkt']
                 
-                # Anvend justering (Procent eller Fast beløb)
-                if adj_type == "Procent (%)":
-                    ny_pris = base_val * (1 + adj_val / 100)
-                else:
-                    ny_pris = base_val + adj_val
-            except:
-                ny_pris = old_p
+                # 0-kilos reglen (Gemmes som de er)
+                if row['Vægt (kg)'] == 0 or old_p == 0:
+                    return old_p
 
-        return pd.Series([ny_pris, service_navn, bracket])
+                if land_code in prices_dict:
+                    pris_tabel = prices_dict[land_code]
+                    if pris_tabel is None: return old_p
+                    
+                    # Find den rigtige række i tabellen
+                    if zone in pris_tabel.index:
+                        service_navn = zone
+                    elif "PickUp" in produkt and "0342 PickUp Parcel Bulk" in pris_tabel.index:
+                        service_navn = "0342 PickUp Parcel Bulk"
+                    elif "PickUp" in produkt and "PickUp Parcel" in pris_tabel.index:
+                        service_navn = "PickUp Parcel"
+                    else:
+                        service_navn = pris_tabel.index[0] if not pris_tabel.empty else "Standard"
+                    
+                    try:
+                        if "Enhedspris" in model_type:
+                            col = pris_tabel.columns[0]
+                            base_val = float(pris_tabel.loc[service_navn, col])
+                        else:
+                            # Præ-beregnet w_idx bruges her
+                            base_val = float(pris_tabel.loc[service_navn].iloc[w_idx])
+                        
+                        # Justering (Procent eller Fast beløb)
+                        if adj_type == "Procent (%)":
+                            return base_val * (1 + adj_val / 100)
+                        else:
+                            return base_val + adj_val
+                    except:
+                        return old_p
+                return old_p
 
-    # Tilføj de nye data-kolonner med en spinner
-    with st.spinner("Beregner nye priser på tværs af Norden..."):
-        master_df[['Ny_Pris', 'Beregnet_Zone', 'Vægtklasse']] = master_df.apply(enrich_and_calculate, axis=1)
+            # Kør beregning på hele df
+            df['Ny_Pris'] = df.apply(get_price, axis=1)
+            # Beregnet Zone bruges kun til visning i heatmap
+            df['Beregnet_Zone'] = df['_Zone']
+            return df
+
+    # UI LOGIK: For store filer skal man trykke på en knap for at undgå lag
+    dataset_size = len(master_df) if master_df is not None else 0
+    is_large_file = dataset_size > 500
     
+    if is_large_file:
+        st.info(f"📊 Datasæt på {dataset_size:,} pakker. Tryk på knappen for at opdatere beregningen efter du har rettet priserne.")
+        if st.button("🔥 Opdater Beregning & Dashboards", use_container_width=True, type="primary"):
+            master_df = calculate_results(master_df, edited_prices_dict)
+            if master_df is not None:
+                st.session_state['last_calc'] = master_df.copy()
+        
+        # Hent sidste resultat fra session state hvis det findes
+        if 'last_calc' in st.session_state:
+            master_df = st.session_state['last_calc']
+        elif master_df is not None:
+            # Første gang viser vi bare grundlaget uden beregning
+            master_df['Ny_Pris'] = master_df['Aftalepris']
+            master_df['Beregnet_Zone'] = master_df['_Zone']
+    else:
+        # For små filer kører vi live-update
+        master_df = calculate_results(master_df, edited_prices_dict)
+
+    if master_df is None:
+        st.error("Kunne ikke generere data. Prøv at uploade igen.")
+        st.stop()
+
     # 4. SAMLET NORDISK DASHBOARD (Vægtet Sum)
     st.divider()
+    # Tjek om vi rent faktisk har lavet en beregning endnu
+    has_calc = 'Ny_Pris' in master_df.columns and (master_df['Ny_Pris'] != master_df['Aftalepris']).any()
+    
     st.header(f"📊 Samlet Nordisk Resultat ({'+' if vol_adj_pct >= 0 else ''}{vol_adj_pct}% volumen)")
     
     # Vægtet beregning (Pris * Mængde)
@@ -365,14 +414,16 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Antal Pakker (Est.)", f"{int(total_count):,}")
     col2.metric("Nuværende Omsætning", f"{total_old:,.0f} kr." if total_old > 0 else "N/A")
-    col3.metric("Ny Aftale (Est.)", f"{total_new:,.0f} kr.", delta=f"{total_diff:,.0f} kr." if total_old > 0 else None, delta_color="inverse")
+    col3.metric("Ny Aftale (Est.)", f"{total_new:,.0f} kr.", delta=f"{total_diff:,.0f} kr." if total_old > 0 and has_calc else None, delta_color="inverse")
     
     with col4:
-        if total_old > 0:
+        if total_old > 0 and has_calc:
             if total_diff <= 0:
                 st.success(f"BESPARELSE: {abs((total_diff/total_old)*100):.1f}%")
             else:
                 st.error(f"MEROMKOSTNING: {(total_diff/total_old*100):.1f}%")
+        elif not has_calc and is_large_file:
+            st.warning("Tryk på 'Opdater Beregning' for analyse.")
         else:
             st.info("Ingen historisk sammenligning.")
 
