@@ -218,25 +218,33 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
 
             aktive_lande = sorted([l for l in master_df['Land leveringsadresse'].unique().tolist() if l != 'UKENDT' and l != '0.0'])
             
-            # --- PRÆ-BEREGNING (OPTIMERING TIL STORE FILER) ---
-            with st.spinner("Præ-beregner zoner og vægtklasser for hurtig redigering..."):
-                def get_weight_index(row, country_steps):
-                    w = row.get('Vægt (kg)', 0)
-                    if w == 0: return -1 # Gebyr
-                    for idx, step in enumerate(country_steps):
-                        if w <= step: return idx
-                    return len(country_steps) - 1 # Max trin
+            # --- PRÆ-BEREGNING (OPTIMERING: Kører kun én gang pr. upload) ---
+            # Vi bruger et hash af filnavnene til at se om vi skal genberegne
+            file_hash = "-".join([f.name for f in files_to_process])
+            if 'current_file_hash' not in st.session_state or st.session_state['current_file_hash'] != file_hash:
+                with st.spinner("Præ-beregner zoner og vægtklasser for hurtig redigering..."):
+                    def get_weight_index(row, country_steps):
+                        w = row.get('Vægt (kg)', 0)
+                        if w == 0: return -1
+                        for idx, step in enumerate(country_steps):
+                            if w <= step: return idx
+                        return len(country_steps) - 1
 
-                # Vi gemmer de rå indeks og zoner én gang for alle
-                master_df['_Zone'] = master_df.apply(lambda r: get_zone(r, r['Land leveringsadresse']), axis=1)
-                
-                # Vægt-indeks pr. land (vi mapper den rigtige liste af steps)
-                def map_w_idx(row):
-                    steps = PRIS_STEPS.get(row['Land leveringsadresse'], PRIS_STEPS["DK"])
-                    return get_weight_index(row, steps)
-                
-                master_df['_W_Idx'] = master_df.apply(map_w_idx, axis=1)
-                master_df['Vægtklasse'] = master_df.apply(lambda r: get_weight_bracket(r['Vægt (kg)'], PRIS_STEPS.get(r['Land leveringsadresse'], PRIS_STEPS["DK"])), axis=1)
+                    master_df['_Zone'] = master_df.apply(lambda r: get_zone(r, r['Land leveringsadresse']), axis=1)
+                    
+                    def map_w_idx(row):
+                        steps = PRIS_STEPS.get(row['Land leveringsadresse'], PRIS_STEPS["DK"])
+                        return get_weight_index(row, steps)
+                    
+                    master_df['_W_Idx'] = master_df.apply(map_w_idx, axis=1)
+                    master_df['Vægtklasse'] = master_df.apply(lambda r: get_weight_bracket(r['Vægt (kg)'], PRIS_STEPS.get(r['Land leveringsadresse'], PRIS_STEPS["DK"])), axis=1)
+                    
+                    # Gem i session state så vi ikke gør det igen
+                    st.session_state['master_df_precalc'] = master_df.copy()
+                    st.session_state['current_file_hash'] = file_hash
+            else:
+                # Hent fra session state hvis filen er den samme
+                master_df = st.session_state['master_df_precalc']
     else:
         # Manuel mode
         aktive_lande = valgte_lande
