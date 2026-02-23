@@ -103,7 +103,8 @@ with st.sidebar:
     st.divider()
     model_type = st.radio(
         "2. Vælg Prismodel",
-        ["Enhedspris (Fast pris)", "Vægtbaseret pris (Matrix)"]
+        ["Enhedspris (Fast pris)", "Vægtbaseret pris (Matrix)"],
+        index=1
     )
     
     st.divider()
@@ -279,12 +280,38 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
             
             # --- PRIS EDITOR ---
             st.markdown(f"**Priser for {land_code}**")
-            if "Enhedspris" in model_type:
-                enhed_df = pd.DataFrame({"Pris pr. pakke (DKK)": [45.0] * len(services)}, index=services)
-                edited_prices_dict[land_code] = st.data_editor(enhed_df, key=f"edit_p_{land_code}")
-            else:
-                matrix_df = pd.DataFrame(45.0, index=services, columns=[f"{w}kg" for w in w_steps])
-                edited_prices_dict[land_code] = st.data_editor(matrix_df, key=f"edit_p_{land_code}")
+            
+            # Init session state til matricen (afhængig af land og model-type)
+            matrix_key = f"m_data_{land_code}_{model_type}"
+            if matrix_key not in st.session_state:
+                if "Enhedspris" in model_type:
+                    st.session_state[matrix_key] = pd.DataFrame({"Pris pr. pakke (DKK)": [45.0] * len(services)}, index=services)
+                else:
+                    st.session_state[matrix_key] = pd.DataFrame(45.0, index=services, columns=[f"{w}kg" for w in w_steps])
+
+            # Upload/Download knapper i en lille kolonne-layout
+            up_col, dl_col = st.columns([1, 1])
+            with up_col:
+                uploaded_m = st.file_uploader(f"Importér {land_code} CSV", type="csv", key=f"up_{land_code}")
+                if uploaded_m:
+                    try:
+                        st.session_state[matrix_key] = pd.read_csv(uploaded_m, index_col=0)
+                        st.toast(f"✅ Matrix for {land_code} indlæst!")
+                    except Exception as e:
+                        st.error(f"Fejl: {e}")
+            
+            # Edit Matrix
+            edited_prices_dict[land_code] = st.data_editor(st.session_state[matrix_key], key=f"edit_p_{land_code}", use_container_width=True)
+            
+            with dl_col:
+                csv_m = edited_prices_dict[land_code].to_csv().encode('utf-8')
+                st.download_button(
+                    label=f"📥 Eksportér {land_code} CSV",
+                    data=csv_m,
+                    file_name=f"Bring_Matrix_{land_code}.csv",
+                    mime="text/csv",
+                    key=f"dl_{land_code}"
+                )
 
             # --- VOLUMEN EDITOR (Kun i manuel mode) ---
             if data_source == "Manuel Estimering (Indtast volumen)":
