@@ -75,9 +75,10 @@ with col_title:
 # --- QUICK GUIDE ---
 with st.expander("📖 Sådan bruger du værktøjet (Quick Guide)"):
     st.markdown("""
-    1. **Vælg Datakilde:** Upload dine Bring-fakturaer (CSV/Excel) eller vælg 'Manuel Estimering' for at indtaste volumen manuelt.
+    1. **Vælg Datakilde:** Upload dine Bring-fakturaer (CSV/Excel) eller vælg 'Manuel Estimering'.
     2. **Tjek Kolonner:** Hvis du uploader en fil, så tjek at appen har fundet de rigtige kolonner (Vægt, Pris, Postnummer).
-    3. **Konfigurer Priser:** Gå til fanerne for hvert land og ret i pris-matricerne så de matcher det nye tilbud.
+    3. **Konfigurer Priser:** Gå til fanerne for hvert land og ret i pris-matricerne. 
+       *   **TIP:** Du kan **Copy-Paste** direkte fra Excel ind i skemaerne herunder!
     4. **Juster & Forhandl:** Brug sidebar'en til at simulere generelle prisstigninger eller volumen-vækst.
     5. **Download Rapport:** Hent den færdige analyse som en professionel Excel-rapport nederst på siden.
     """)
@@ -199,53 +200,67 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
             # Anvend mapping
             master_df = master_df.rename(columns={v: k for k, v in mapping.items() if v in master_df.columns})
 
-            # --- DATA RENSNING ---
+            # --- DATA RENSNING & OPTIMERING ---
             master_df['Land leveringsadresse'] = master_df['Land leveringsadresse'].fillna('UKENDT').astype(str).str.strip().str.upper()
             
-            def clean_numeric(val):
-                if pd.isna(val): return 0.0
-                s = str(val).replace(' ', '').replace(',', '.')
-                try: return float(s)
-                except: return 0.0
+            # Hurtig numerisk konvertering
+            for col in ['Vægt (kg)', 'Aftalepris']:
+                if col in master_df.columns:
+                    master_df[col] = pd.to_numeric(master_df[col].astype(str).str.replace(' ', '').str.replace(',', '.'), errors='coerce').fillna(0.0)
 
-            master_df['Vægt (kg)'] = master_df['Vægt (kg)'].apply(clean_numeric)
-            master_df['Aftalepris'] = master_df['Aftalepris'].apply(clean_numeric)
             master_df['Modtagers postnummer'] = master_df['Modtagers postnummer'].fillna('0000').astype(str).str.strip()
             master_df['Produkt'] = master_df['Produkt'].fillna('Ukendt').astype(str).str.strip()
 
-            with st.expander("🛠️ Se detaljer om data-rensning"):
-                st.write("Kolonne-mapping anvendt:", mapping)
-                st.success("Data er renset og klar til analyse.")
-
             aktive_lande = sorted([l for l in master_df['Land leveringsadresse'].unique().tolist() if l != 'UKENDT' and l != '0.0'])
             
-            # --- PRÆ-BEREGNING (OPTIMERING: Kører kun én gang pr. upload) ---
-            # Vi bruger et hash af filnavnene til at se om vi skal genberegne
+            # --- PRÆ-BEREGNING (VEKTORISERET OPTIMERING) ---
             file_hash = "-".join([f.name for f in files_to_process])
-            if 'current_file_hash' not in st.session_state or st.session_state['current_file_hash'] != file_hash:
-                with st.spinner("Præ-beregner zoner og vægtklasser for hurtig redigering..."):
-                    def get_weight_index(row, country_steps):
-                        w = row.get('Vægt (kg)', 0)
-                        if w == 0: return -1
-                        for idx, step in enumerate(country_steps):
-                            if w <= step: return idx
-                        return len(country_steps) - 1
-
+            if 'master_df_precalc' not in st.session_state or st.session_state.get('current_file_hash') != file_hash:
+                with st.spinner("Præ-beregner zoner og vægtklasser (Vektoriseret)..."):
+                    # 1. Zone mapping (Vektoriseret hvor muligt)
+                    # For simpelhed beholder vi get_zone til de komplekse regler, men kører den kun én gang
                     master_df['_Zone'] = master_df.apply(lambda r: get_zone(r, r['Land leveringsadresse']), axis=1)
                     
-                    def map_w_idx(row):
-                        steps = PRIS_STEPS.get(row['Land leveringsadresse'], PRIS_STEPS["DK"])
-                        return get_weight_index(row, steps)
+                    # 2. Vægt-indeks (Vektoriseret opslag)
+                    master_df['_W_Idx'] = 0
+                    master_df['Vægtklasse'] = "0 kg (Gebyr/Info)"
                     
-                    master_df['_W_Idx'] = master_df.apply(map_w_idx, axis=1)
-                    master_df['Vægtklasse'] = master_df.apply(lambda r: get_weight_bracket(r['Vægt (kg)'], PRIS_STEPS.get(r['Land leveringsadresse'], PRIS_STEPS["DK"])), axis=1)
+                    for land_code in aktive_lande:
+                        mask = master_df['Land leveringsadresse'] == land_code
+                        if not mask.any(): continue
+                        
+                        steps = PRIS_STEPS.get(land_code, PRIS_STEPS["DK"])
+                        weights = master_df.loc[mask, 'Vægt (kg)']
+                        
+                        # Find indeks lynhurtigt via searchsorted
+                        import numpy as np
+                        indices = np.searchsorted(steps, weights, side='left')
+                        # Cap ved max indeks
+                        indices = np.clip(indices, 0, len(steps) - 1)
+                        # Sæt indeks til -1 for 0 kg
+                        indices = np.where(weights == 0, -1, indices)
+                        
+                        master_df.loc[mask, '_W_Idx'] = indices
+                        
+                        # Generer vægtklasse navne (også hurtigere)
+                        def bulk_bracket(w, s_list):
+                            if w == 0: return "0 kg (Gebyr/Info)"
+                            prev = 0
+                            for s in s_list:
+                                if w <= s: return f"{prev}-{s} kg"
+                                prev = s
+                            return f">{s_list[-1]} kg"
+                        
+                        master_df.loc[mask, 'Vægtklasse'] = weights.apply(lambda w: bulk_bracket(w, steps))
                     
-                    # Gem i session state så vi ikke gør det igen
                     st.session_state['master_df_precalc'] = master_df.copy()
                     st.session_state['current_file_hash'] = file_hash
             else:
-                # Hent fra session state hvis filen er den samme
                 master_df = st.session_state['master_df_precalc']
+
+            with st.expander("🛠️ Se detaljer om data-rensning"):
+                st.write("Kolonne-mapping anvendt:", mapping)
+                st.success("Data er præ-beregnet og klar.")
     else:
         # Manuel mode
         aktive_lande = valgte_lande
@@ -292,10 +307,10 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
             # Upload/Download knapper i en lille kolonne-layout
             up_col, dl_col = st.columns([1, 1])
             with up_col:
-                uploaded_m = st.file_uploader(f"Importér {land_code} CSV", type="csv", key=f"up_{land_code}")
+                uploaded_m = st.file_uploader(f"Importér {land_code} (Excel)", type=["xlsx", "xls"], key=f"up_{land_code}")
                 if uploaded_m:
                     try:
-                        st.session_state[matrix_key] = pd.read_csv(uploaded_m, index_col=0)
+                        st.session_state[matrix_key] = pd.read_excel(uploaded_m, index_col=0)
                         st.toast(f"✅ Matrix for {land_code} indlæst!")
                     except Exception as e:
                         st.error(f"Fejl: {e}")
@@ -304,12 +319,16 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
             edited_prices_dict[land_code] = st.data_editor(st.session_state[matrix_key], key=f"edit_p_{land_code}", use_container_width=True)
             
             with dl_col:
-                csv_m = edited_prices_dict[land_code].to_csv().encode('utf-8')
+                # Excel export
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    edited_prices_dict[land_code].to_excel(writer, index=True)
+                
                 st.download_button(
-                    label=f"📥 Eksportér {land_code} CSV",
-                    data=csv_m,
-                    file_name=f"Bring_Matrix_{land_code}.csv",
-                    mime="text/csv",
+                    label=f"📥 Eksportér {land_code} (Excel)",
+                    data=buffer.getvalue(),
+                    file_name=f"Bring_Matrix_{land_code}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"dl_{land_code}"
                 )
 
@@ -352,57 +371,57 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
             st.warning("Indtast venligst nogle pakkemængder i fanerne ovenfor for at se beregningen.")
             st.stop()
 
-    # 3. DEN STORE BEREGNING (OPTIMERET & VEKTORISERET)
+    # 3. DEN STORE BEREGNING (LYNHURTIG & VEKTORISERET)
     def calculate_results(df, prices_dict):
         if df is None: return None
         
         with st.spinner("Beregner nye priser... En krone her, en krone der..."):
-            # Vi bruger de præ-beregnede zoner og indekser
-            def get_price(row):
-                land_code = row['Land leveringsadresse']
-                old_p = row['Aftalepris']
-                w_idx = int(row['_W_Idx'])
-                zone = row['_Zone']
-                produkt = row['Produkt']
+            new_prices = []
+            
+            # Vi itererer over lande i stedet for rækker (meget hurtigere)
+            df['Ny_Pris'] = df['Aftalepris'] # Default
+            
+            for land in prices_dict.keys():
+                mask = df['Land leveringsadresse'] == land
+                if not mask.any(): continue
                 
-                # 0-kilos reglen (Gemmes som de er)
-                if row['Vægt (kg)'] == 0 or old_p == 0:
-                    return old_p
+                pris_tabel = prices_dict[land]
+                if pris_tabel is None: continue
+                
+                # Præ-beregn priser for dette land via vektor-mapping
+                def get_row_price(row_data):
+                    w_idx = int(row_data['_W_Idx'])
+                    zone = row_data['_Zone']
+                    produkt = row_data['Produkt']
+                    old_p = row_data['Aftalepris']
+                    weight = row_data['Vægt (kg)']
 
-                if land_code in prices_dict:
-                    pris_tabel = prices_dict[land_code]
-                    if pris_tabel is None: return old_p
-                    
-                    # Find den rigtige række i tabellen
+                    if weight == 0 or old_p == 0:
+                        return old_p
+
+                    # Zone/Service logik
                     if zone in pris_tabel.index:
-                        service_navn = zone
+                        service = zone
                     elif "PickUp" in produkt and "0342 PickUp Parcel Bulk" in pris_tabel.index:
-                        service_navn = "0342 PickUp Parcel Bulk"
+                        service = "0342 PickUp Parcel Bulk"
                     elif "PickUp" in produkt and "PickUp Parcel" in pris_tabel.index:
-                        service_navn = "PickUp Parcel"
+                        service = "PickUp Parcel"
                     else:
-                        service_navn = pris_tabel.index[0] if not pris_tabel.empty else "Standard"
-                    
+                        service = pris_tabel.index[0]
+
                     try:
                         if "Enhedspris" in model_type:
-                            col = pris_tabel.columns[0]
-                            base_val = float(pris_tabel.loc[service_navn, col])
+                            base = float(pris_tabel.loc[service].iloc[0])
                         else:
-                            # Præ-beregnet w_idx bruges her
-                            base_val = float(pris_tabel.loc[service_navn].iloc[w_idx])
+                            base = float(pris_tabel.loc[service].iloc[w_idx])
                         
-                        # Justering (Procent eller Fast beløb)
-                        if adj_type == "Procent (%)":
-                            return base_val * (1 + adj_val / 100)
-                        else:
-                            return base_val + adj_val
+                        return base * (1 + adj_val / 100) if adj_type == "Procent (%)" else base + adj_val
                     except:
                         return old_p
-                return old_p
 
-            # Kør beregning på hele df
-            df['Ny_Pris'] = df.apply(get_price, axis=1)
-            # Beregnet Zone bruges kun til visning i heatmap
+                # Anvend på landets subset
+                df.loc[mask, 'Ny_Pris'] = df[mask].apply(get_row_price, axis=1)
+            
             df['Beregnet_Zone'] = df['_Zone']
             return df
 
