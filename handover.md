@@ -1,48 +1,38 @@
 # 🚚 Bring Nordic Master-Beregner v1.0 - PROD READY
 
-Dette dokument markerer overdragelsen af den færdige version af salgsværktøjet. Værktøjet er udviklet til at give Bring-sælgere et kraftfuldt "Salgs-cockpit" til analyse og forhandling af nordiske fragtaftaler.
+Dette værktøj er nu klar til udrulning. Det er optimeret til at håndtere både historiske Bring-fakturaer og manuelle estimater under forhandling.
 
 ---
 
-## 🚀 Hovedfunktioner
+## 🚀 Seneste Opdateringer (QA Gennemført)
 
-### 1. Dobbelt Datakilde (Fleksibilitet)
-- **Upload Rapport:** Håndterer rå Bring "Foreløbig fragtberegning"-filer (CSV/Excel).
-- **Manuel Estimering:** Gør det muligt at indtaste forventet volumen pr. tjeneste og vægtklasse manuelt, når kunden endnu ikke har trukket en rapport.
+### 1. Manuel Estimering & Volumen-Matrix
+- Sælgeren kan nu vælge "Manuel Estimering" i sidebar'en.
+- Der er tilføjet en **Volumen-Matrix** under hver lande-fane, hvor man kan indtaste antal pakker pr. tjeneste og vægt.
+- Beregningsmotoren er opdateret til at bruge en vægtet `Mængde`-kolonne, så alle totaler og heatmaps afspejler de indtastede volumener.
 
-### 2. Intelligent Beregningsmotor
-- **0-kilos reglen:** Bevarer automatisk prisen på tillægsgebyrer og information (0kg/0kr linjer).
-- **Zone-mapping:** Automatisk postnummer-identifikation for SE, NO og FI.
-- **Vægtet Mængde:** Hele motoren bagved bruger en `Mængde`-kolonne, der gør, at både række-baserede fakturaer og manuelt indtastede mængder summeres korrekt.
+### 2. Præcis Zone-mapping (Norge Special)
+- **Norge:** Nu baseret på numeriske intervaller (0000-1299=OSL, 1300-3999=NOR2, osv.).
+- **Rensning:** Automatisk håndtering af foranstillede nuller (zfill) og fjernelse af mellemrum i postnumre.
+- **Zone-priser:** Alle zoner (NOR2-NORS, FI00-FI04) er nu eksplicitte rækker i priseditoren. Appen prioriterer zone-specifikke priser før produkt-standardpriser.
 
-### 3. Forhandling & Simulering (Live)
-- **Global Prisjustering (%):** Simuler lynhurtigt en generel prisstigning eller rabat på tværs af alle lande.
-- **Volumen-vækst (%):** Vis kunden konsekvensen af deres forventede vækst (f.eks. +25% pakker næste år).
-- **Prismodeller:** Skift mellem "Enhedspris" og "Vægtbaseret Matrix" med ét klik.
-
-### 4. Visualisering & Eksport
-- **Pakkeprofil (Heatmap):** Viser præcis hvor kundens pakker ligger (Zone vs. Vægtklasse) med blåt farve-overlay.
-- **Multi-ark Excel Rapport:** Genererer en professionel .xlsx-fil med Dashboard, Lande-oversigt og detaljeret data-grundlag (inkl. sikkerhed mod Excel Formula Injection).
+### 3. Valuta-politik (En krone er en krone)
+- Efter analyse er al valuta-omregning fjernet for at gøre værktøjet intuitivt. 
+- **Regel:** Appen antager, at alle indtastede priser er i kundens afregningsvaluta (typisk DKK).
 
 ---
 
-## 🛠️ Teknisk Setup (Senior QA Status)
+## 🧠 Kerne-logik (VIGTIGT FOR AI)
 
-- **Sikkerhed:** Alle tekstfelter i Excel-eksporten "escapes" med en enkelt pløk (`'`) for at undgå ondsindede formler.
-- **Robusthed:** Inkluderer en "Kolonne-Mapper", der lader brugeren manuelt vælge kolonner, hvis filens navne afviger fra standarden.
-- **Type-sikker:** Koden er gennemtestet for type-fejl og bruger eksplicit casting (`float()`, `pd.to_numeric()`) for at undgå beregningsfejl.
-- **Branding:** Fuldt integreret med Bring logoer, favicon og officielle farver.
-
----
-
-## 📖 Hurtig Guide til Sælgeren
-
-1.  **Vælg lande:** Vælg hvilke nordiske lande kunden sender til.
-2.  **Data:** Upload kundens faktura eller indtast deres forventede volumen i fanerne.
-3.  **Hjælp appen:** Hvis appen spørger om kolonner (gul boks), så vælg de rigtige felter fra din fil.
-4.  **Simuler:** Juster priserne i tabellerne, træk i sliderne for pris/volumen, og se den samlede Nordiske besparelse i toppen.
-5.  **Lever:** Tryk på "Hent Excel-rapport" og vedhæft den til dit tilbud eller brug den som internt beslutningsgrundlag.
+- **0-kilos reglen:** Pakker med vægt = 0 eller gammel pris = 0 betragtes som gebyrer og bevarer deres oprindelige pris uændret.
+- **Vægttrin:** Priser slås op som "op til" (f.eks. en 4.5kg pakke i en 1, 3, 5kg matrix får 5kg prisen).
+- **Mængde-skalering:** Alle beregninger (Old/New Price) ganges med `Mængde * (1 + Volumen-vækst)`.
 
 ---
 
-*Projektet er nu afsluttet og klar til brug.* 🚛✨
+## 🛠️ Teknisk Status
+- **Dependencies:** `streamlit`, `pandas`, `openpyxl`, `matplotlib` (til heatmap).
+- **Sikkerhed:** Excel-eksport er beskyttet mod Formula Injection.
+- **Robusthed:** Kolonne-mapper håndterer alternative navne (Weight, Price, Zip) automatisk.
+
+*Tak for i dag! Værktøjet er gemt og klar til næste session.* 🚛✨
