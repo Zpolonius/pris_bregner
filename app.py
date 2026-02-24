@@ -418,16 +418,17 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
             st.warning("Indtast venligst nogle pakkemængder i fanerne ovenfor for at se beregningen.")
             st.stop()
 
-    # 3. DEN STORE BEREGNING (LYNHURTIG & VEKTORISERET)
+    # 3. DEN STORE BEREGNING (EKSTREMT HURTIG & FULDT VEKTORISERET)
     def calculate_results(df, prices_dict):
         if df is None: return None
         
-        with st.spinner("Beregner nye priser... En krone her, en krone der..."):
-            new_prices = []
+        with st.spinner("Beregner nye priser (Vektoriseret)..."):
+            # Kopier for at undgå mutations-problemer
+            df = df.copy()
+            df['Ny_Pris'] = df['Aftalepris'].copy()
+            df['Beregnet_Zone'] = df['_Zone'].copy()
             
-            # Vi itererer over lande i stedet for rækker (meget hurtigere)
-            df['Ny_Pris'] = df['Aftalepris'] # Default
-            
+            # Vi beregner land for land for at udnytte vektorisering
             for land in prices_dict.keys():
                 mask = df['Land leveringsadresse'] == land
                 if not mask.any(): continue
@@ -435,41 +436,58 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
                 pris_tabel = prices_dict[land]
                 if pris_tabel is None: continue
                 
-                # Præ-beregn priser for dette land via vektor-mapping
-                def get_row_price(row_data):
-                    w_idx = int(row_data['_W_Idx'])
-                    zone = row_data['_Zone']
-                    produkt = row_data['Produkt']
-                    old_p = row_data['Aftalepris']
-                    weight = row_data['Vægt (kg)']
+                # Præ-konverter matrix til en flad dictionary for hurtigt opslag
+                # Dette er meget hurtigere end .loc inde i en loop
+                price_matrix = pris_tabel.values
+                services_list = pris_tabel.index.tolist()
+                
+                # Vi finder servicen for alle rækker i dette land én gang
+                land_subset = df[mask].copy()
+                
+                # 1. Præ-beregn zone/service mapping (meget hurtigere end vectorize)
+                # Vi skaber en mapping serie fra Produkterne
+                service_map = {}
+                for s in services_list:
+                    service_map[s] = services_list.index(s)
+                
+                # Default mapping
+                def fast_service_map(p, z):
+                    if z in service_map: return service_map[z]
+                    p_str = str(p)
+                    if "PickUp" in p_str:
+                        if "0342 PickUp Parcel Bulk" in service_map: return service_map["0342 PickUp Parcel Bulk"]
+                        if "PickUp Parcel" in service_map: return service_map["PickUp Parcel"]
+                    return 0
 
-                    if weight == 0 or old_p == 0:
-                        return old_p
-
-                    # Zone/Service logik
-                    if zone in pris_tabel.index:
-                        service = zone
-                    elif "PickUp" in produkt and "0342 PickUp Parcel Bulk" in pris_tabel.index:
-                        service = "0342 PickUp Parcel Bulk"
-                    elif "PickUp" in produkt and "PickUp Parcel" in pris_tabel.index:
-                        service = "PickUp Parcel"
+                # Hurtig række-baseret mapping (kun for dette lands subset)
+                s_indices = np.array([fast_service_map(p, z) for p, z in zip(land_subset['Produkt'], land_subset['_Zone'])])
+                w_indices = land_subset['_W_Idx'].values.astype(int)
+                
+                # Kun beregn for pakker med vægt > 0
+                valid_mask = (land_subset['Vægt (kg)'].values > 0) & (land_subset['Aftalepris'].values > 0)
+                
+                if valid_mask.any():
+                    # Træk priserne direkte fra den rå numpy matrix (Lynhurtigt!)
+                    row_idx = s_indices[valid_mask]
+                    col_idx = w_indices[valid_mask]
+                    
+                    if "Enhedspris" in model_type:
+                        col_idx = 0 
+                    
+                    # Hent priserne fra matrix via advanced indexing
+                    bases = price_matrix[row_idx, col_idx]
+                    
+                    # Anvend justeringer
+                    if adj_type == "Procent (%)":
+                        new_vals = bases * (1 + adj_val / 100)
                     else:
-                        service = pris_tabel.index[0]
-
-                    try:
-                        if "Enhedspris" in model_type:
-                            base = float(pris_tabel.loc[service].iloc[0])
-                        else:
-                            base = float(pris_tabel.loc[service].iloc[w_idx])
-                        
-                        return base * (1 + adj_val / 100) if adj_type == "Procent (%)" else base + adj_val
-                    except:
-                        return old_p
-
-                # Anvend på landets subset
-                df.loc[mask, 'Ny_Pris'] = df[mask].apply(get_row_price, axis=1)
+                        new_vals = bases + adj_val
+                    
+                    # Skriv tilbage
+                    final_prices = land_subset['Aftalepris'].values.copy()
+                    final_prices[valid_mask] = new_vals
+                    df.loc[mask, 'Ny_Pris'] = final_prices
             
-            df['Beregnet_Zone'] = df['_Zone']
             return df
 
     # UI LOGIK: For store filer skal man trykke på en knap for at undgå lag
