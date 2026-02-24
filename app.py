@@ -76,7 +76,7 @@ with col_title:
 # --- QUICK GUIDE ---
 with st.expander("📖 Sådan bruger du værktøjet (Quick Guide)"):
     st.markdown("""
-    1. **Vælg Datakilde:** Upload dine Bring-fakturaer (CSV/Excel) eller vælg 'Manuel Estimering'.
+    1. **Vælg Datakilde:** Hent Foreløbelig fragtberegning fra MyBring og upload den eller brug Manuel estimering.
     2. **Tjek Kolonner:** Hvis du uploader en fil, så tjek at appen har fundet de rigtige kolonner (Vægt, Pris, Postnummer).
     3. **Konfigurer Priser:** Gå til fanerne for hvert land og ret i pris-matricerne. 
        *   **TIP:** Du kan **Copy-Paste** direkte fra Excel ind i skemaerne herunder!
@@ -586,6 +586,32 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
     pivot_table = (pivot_table * vol_multiplier).round(0).astype(int)
     st.dataframe(pivot_table.style.background_gradient(cmap='Blues', axis=None), use_container_width=True)
 
+    # 6b. IMPACT HEATMAP (Hvor flytter pengene sig?)
+    st.markdown(f"**💰 Pris-Impact (Gns. forskel i kr. pr. pakke for {valgt_land_oversigt})**")
+    st.caption("Grøn = Besparelse for kunden, Rød = Meromkostning for kunden")
+    
+    # Beregn gennemsnitlig forskel pr. celle
+    impact_pivot = pd.pivot_table(
+        df_land,
+        values='Ny_Pris', # Midlertidig
+        index='Beregnet_Zone',
+        columns='Vægtklasse',
+        aggfunc=lambda x: (df_land.loc[x.index, 'Ny_Pris'] - df_land.loc[x.index, 'Aftalepris']).mean(),
+        fill_value=0
+    )
+    
+    # Sorter kolonnerne efter vægt igen
+    impact_pivot = impact_pivot[sorted_cols[:-1]] # Fjern 'Total' fra impact
+    
+    # Styling: Rød for positive tal (dyrere), Grøn for negative (billigere)
+    # Vi bruger en 'RdYlGn' (Red-Yellow-Green) skala, men omvendt (reversed '_r') 
+    # så Grøn er negativ (besparelse) og Rød er positiv (stigning)
+    st.dataframe(
+        impact_pivot.style.background_gradient(cmap='RdYlGn_r', axis=None)
+        .format("{:+.1f} kr"), 
+        use_container_width=True
+    )
+
 
     # 7. EKSPORT TIL EXCEL
     st.divider()
@@ -593,18 +619,48 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
     
     def sanitize_for_excel(df):
         clean_df = df.copy()
+        # Kun tjek objekt-kolonner (tekst)
         for col in clean_df.select_dtypes(include=['object']):
-            clean_df[col] = clean_df[col].apply(lambda x: f"'{x}" if str(x).startswith(('=', '+', '-', '@')) else x)
+            # Vektoriseret sanitering (meget hurtigere end .apply)
+            mask = clean_df[col].astype(str).str.startswith(('=', '+', '-', '@'), na=False)
+            if mask.any():
+                clean_df.loc[mask, col] = "'" + clean_df.loc[mask, col].astype(str)
         return clean_df
 
     def create_excel_report(df, breakdown_df, settings):
         output = io.BytesIO()
-        safe_df = sanitize_for_excel(df)
+        
+        # Forbered data til eksport (Omdøbning og beregning af linje-forskel)
+        export_df = df.copy()
+        export_df['Forskel (kr.)'] = export_df['Ny_Pris'] - export_df['Aftalepris']
+        
+        # Vælg og omdøb kolonner
+        rename_map = {
+            'Aftalepris': 'Førpris (Nuværende)',
+            'Ny_Pris': 'Ny Pris (Efter)',
+            'Beregnet_Zone': 'Zone',
+            'Land leveringsadresse': 'Land'
+        }
+        export_df = export_df.rename(columns=rename_map)
+        
+        export_cols = [
+            'Land', 'Produkt', 'Modtagers postnummer', 'Zone',
+            'Vægt (kg)', 'Førpris (Nuværende)', 'Ny Pris (Efter)', 'Forskel (kr.)', 'Vægtklasse', 'Mængde'
+        ]
+        
+        # Behold originale kolonner hvis de findes og ikke er i listen (undgå interne _ kolonner)
+        for col in export_df.columns:
+            if col not in export_cols and not col.startswith('_') and col not in rename_map.values():
+                export_cols.append(col)
+        
+        # Filtrer og saniter
+        final_export_df = sanitize_for_excel(export_df[export_cols])
+        
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             settings_df = pd.DataFrame(list(settings.items()), columns=['Parameter', 'Værdi'])
             settings_df.to_excel(writer, sheet_name='Dashboard', index=False)
             breakdown_df.to_excel(writer, sheet_name='Land Oversigt')
-            safe_df.to_excel(writer, sheet_name='Data Grundlag', index=False)
+            final_export_df.to_excel(writer, sheet_name='Data Grundlag', index=False)
         return output.getvalue()
 
     settings_summary = {
@@ -618,16 +674,33 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
         "Samlet Ny Omsætning": int(total_new)
     }
     if total_old > 0:
-        settings_summary["Samlet Besparelse (%)"] = f"{(total_diff/total_old*100):.1f}%"
+        settings_summary["Forskel (%)"] = f"{(total_diff/total_old*100):.1f}%"
 
-    excel_data = create_excel_report(master_df, breakdown, settings_summary)
-    
-    st.download_button(
-        label="📥 Hent komplet Excel-rapport (.xlsx)",
-        data=excel_data,
-        file_name=f"Bring_Analyse_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    # UI til rapportgenerering
+    if is_large_file:
+        st.warning("⚠️ Da du har et meget stort datasæt, skal rapporten forberedes manuelt.")
+        if st.button("🚀 Forbered Excel Rapport (kan tage 30-60 sek.)"):
+            with st.spinner("Genererer komplet Excel-fil..."):
+                excel_data = create_excel_report(master_df, breakdown, settings_summary)
+                st.session_state['report_data'] = excel_data
+                st.success("✅ Rapport er klar!")
+
+        if 'report_data' in st.session_state:
+            st.download_button(
+                label="📥 Hent Forberedt Excel-rapport (.xlsx)",
+                data=st.session_state['report_data'],
+                file_name=f"Bring_Analyse_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+    else:
+        # For små filer genererer vi den stadig automatisk for bekvemmelighed
+        excel_data = create_excel_report(master_df, breakdown, settings_summary)
+        st.download_button(
+            label="📥 Hent Excel-rapport (.xlsx)",
+            data=excel_data,
+            file_name=f"Bring_Analyse_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 else:
     st.info("👈 Upload en eller flere filer for at starte (f.eks. både SE, NO og FI).")
