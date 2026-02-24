@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import io
 
 # --- KONFIGURATION (Zoner & Vægttrin) ---
@@ -233,7 +234,6 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
                         weights = master_df.loc[mask, 'Vægt (kg)']
                         
                         # Find indeks lynhurtigt via searchsorted
-                        import numpy as np
                         indices = np.searchsorted(steps, weights, side='left')
                         # Cap ved max indeks
                         indices = np.clip(indices, 0, len(steps) - 1)
