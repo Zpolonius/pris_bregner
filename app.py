@@ -555,6 +555,10 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
         'Weighted_Old': 'sum',
         'Weighted_New': 'sum'
     }).rename(columns={'Weighted_Old': 'Nuværende', 'Weighted_New': 'Ny Pris'})
+    
+    # Sikr numerisk subtraktion
+    breakdown['Nuværende'] = pd.to_numeric(breakdown['Nuværende'], errors='coerce').fillna(0.0)
+    breakdown['Ny Pris'] = pd.to_numeric(breakdown['Ny Pris'], errors='coerce').fillna(0.0)
     breakdown['Forskel'] = breakdown['Ny Pris'] - breakdown['Nuværende']
     st.dataframe(breakdown.style.format("{:,.0f}"), use_container_width=True)
     
@@ -591,12 +595,20 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
     st.caption("Grøn = Besparelse for kunden, Rød = Meromkostning for kunden")
     
     # Beregn gennemsnitlig forskel pr. celle
+    # Vi sikrer os at værdierne er numeriske før subtraktion
+    df_land_numeric = df_land.copy()
+    df_land_numeric['Ny_Pris'] = pd.to_numeric(df_land_numeric['Ny_Pris'], errors='coerce').fillna(0.0)
+    df_land_numeric['Aftalepris'] = pd.to_numeric(df_land_numeric['Aftalepris'], errors='coerce').fillna(0.0)
+    
+    # Beregn forskellen først (meget mere robust)
+    df_land_numeric['Price_Diff'] = df_land_numeric['Ny_Pris'] - df_land_numeric['Aftalepris']
+    
     impact_pivot = pd.pivot_table(
-        df_land,
-        values='Ny_Pris', # Midlertidig
+        df_land_numeric,
+        values='Price_Diff',
         index='Beregnet_Zone',
         columns='Vægtklasse',
-        aggfunc=lambda x: (df_land.loc[x.index, 'Ny_Pris'] - df_land.loc[x.index, 'Aftalepris']).mean(),
+        aggfunc='mean',
         fill_value=0
     )
     
@@ -632,6 +644,10 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
         
         # Forbered data til eksport (Omdøbning og beregning af linje-forskel)
         export_df = df.copy()
+        
+        # Sikr numeriske typer før beregning
+        export_df['Ny_Pris'] = pd.to_numeric(export_df['Ny_Pris'], errors='coerce').fillna(0.0)
+        export_df['Aftalepris'] = pd.to_numeric(export_df['Aftalepris'], errors='coerce').fillna(0.0)
         export_df['Forskel (kr.)'] = export_df['Ny_Pris'] - export_df['Aftalepris']
         
         # Vælg og omdøb kolonner
