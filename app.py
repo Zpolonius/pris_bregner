@@ -255,6 +255,52 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
                     
                     st.session_state['master_df_precalc'] = master_df.copy()
                     st.session_state['current_file_hash'] = file_hash
+                    
+                    # --- NYT: GENERER START-MATRICER BASERET PÅ HISTORIK ---
+                    for l_code in aktive_lande:
+                        l_df = master_df[master_df['Land leveringsadresse'] == l_code]
+                        # Vi kigger kun på fragt-linjer (pris > 0)
+                        l_df_prices = l_df[l_df['Aftalepris'] > 0]
+                        
+                        w_steps = PRIS_STEPS.get(l_code, PRIS_STEPS["DK"])
+                        # Definer services baseret på land (samme logik som i tabs)
+                        if l_code == "SE": s_list = ["0342 PickUp Parcel Bulk", "CITY-1", "CITY-2", "SOUTH-2"]
+                        elif l_code == "NO": s_list = ["0342 PickUp Parcel Bulk", "OSL", "NOR2", "NOR3", "NOR4", "NORS"]
+                        elif l_code == "FI": s_list = ["0342 PickUp Parcel Bulk", "FI00", "FI01", "FI02", "FI04"]
+                        else: s_list = ["PickUp Parcel", "Home Delivery", "Business Parcel"]
+                        
+                        # Lav tom matrix
+                        m_template = pd.DataFrame(0.0, index=s_list, columns=[f"{w}kg" for w in w_steps])
+                        
+                        # Beregn gennemsnit pr. zone og vægt-indeks
+                        if not l_df_prices.empty:
+                            avg_map = l_df_prices.groupby(['_Zone', '_W_Idx'])['Aftalepris'].mean().to_dict()
+                            
+                            for s in s_list:
+                                for idx, w_col in enumerate(m_template.columns):
+                                    # Find gennemsnit for denne specifikke celle
+                                    val = avg_map.get((s, idx))
+                                    if val is None:
+                                        # Fallback 1: Gennemsnit for hele zonen
+                                        val = l_df_prices[l_df_prices['_Zone'] == s]['Aftalepris'].mean()
+                                    if pd.isna(val) or val == 0:
+                                        # Fallback 2: Gennemsnit for hele landet
+                                        val = l_df_prices['Aftalepris'].mean()
+                                    if pd.isna(val) or val == 0:
+                                        val = 45.0 # Absolut fallback
+                                        
+                                    m_template.loc[s, w_col] = round(float(val), 2)
+                        else:
+                            m_template.fill(45.0)
+
+                        # Gem den intelligente start-matrix i session state (overskriv eksisterende ved nyt upload)
+                        st.session_state[f"m_data_{l_code}_Vægtbaseret pris (Matrix)"] = m_template
+                        
+                        # Enhedspris fallback
+                        st.session_state[f"m_data_{l_code}_Enhedspris (Fast pris)"] = pd.DataFrame(
+                            {"Pris pr. pakke (DKK)": [round(l_df_prices['Aftalepris'].mean(), 2) if not l_df_prices.empty else 45.0] * len(s_list)}, 
+                            index=s_list
+                        )
             else:
                 master_df = st.session_state['master_df_precalc']
 
@@ -299,6 +345,7 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
             # Init session state til matricen (afhængig af land og model-type)
             matrix_key = f"m_data_{land_code}_{model_type}"
             if matrix_key not in st.session_state:
+                # Kun fallback her (primært til Manuel Mode)
                 if "Enhedspris" in model_type:
                     st.session_state[matrix_key] = pd.DataFrame({"Pris pr. pakke (DKK)": [45.0] * len(services)}, index=services)
                 else:
