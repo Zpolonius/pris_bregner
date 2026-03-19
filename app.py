@@ -363,7 +363,15 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
                         st.error(f"Fejl: {e}")
             
             # Edit Matrix
-            edited_prices_dict[land_code] = st.data_editor(st.session_state[matrix_key], key=f"edit_p_{land_code}", use_container_width=True)
+            edited_prices_dict[land_code] = st.data_editor(
+                st.session_state[matrix_key], 
+                key=f"edit_p_{land_code}", 
+                use_container_width=True,
+                column_config={
+                    col: st.column_config.NumberColumn(format="%.2f") 
+                    for col in st.session_state[matrix_key].columns
+                }
+            )
             
             with dl_col:
                 # Excel export
