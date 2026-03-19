@@ -517,6 +517,7 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
             master_df = calculate_results(master_df, edited_prices_dict)
             if master_df is not None:
                 st.session_state['last_calc'] = master_df.copy()
+                st.rerun() # Tving UI til at genindlæse med de nye tal
         
         # Hent sidste resultat fra session state hvis det findes
         if 'last_calc' in st.session_state:
