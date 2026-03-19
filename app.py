@@ -359,8 +359,8 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
                 if uploaded_m:
                     try:
                         loaded_df = pd.read_excel(uploaded_m, index_col=0)
-                        # Konverter alle værdier til tekst med komma for ensartethed
-                        st.session_state[matrix_key] = loaded_df.applymap(lambda x: str(x).replace('.', ','))
+                        # Konverter alle værdier til tekst med komma for ensartethed på en sikker måde
+                        st.session_state[matrix_key] = loaded_df.map(lambda x: str(x).replace('.', ','))
                         st.toast(f"✅ Matrix for {land_code} indlæst!")
                     except Exception as e:
                         st.error(f"Fejl: {e}")
