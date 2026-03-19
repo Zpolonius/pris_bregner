@@ -347,9 +347,10 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
             if matrix_key not in st.session_state:
                 # Kun fallback her (primært til Manuel Mode)
                 if "Enhedspris" in model_type:
-                    st.session_state[matrix_key] = pd.DataFrame({"Pris pr. pakke (DKK)": [45.0] * len(services)}, index=services)
+                    df_init = pd.DataFrame({"Pris pr. pakke (DKK)": ["45,00"] * len(services)}, index=services)
                 else:
-                    st.session_state[matrix_key] = pd.DataFrame(45.0, index=services, columns=[f"{w}kg" for w in w_steps])
+                    df_init = pd.DataFrame("45,00", index=services, columns=[f"{w}kg" for w in w_steps])
+                st.session_state[matrix_key] = df_init.astype(str) # Tving som tekst for komma-support
 
             # Upload/Download knapper i en lille kolonne-layout
             up_col, dl_col = st.columns([1, 1])
@@ -357,20 +358,18 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
                 uploaded_m = st.file_uploader(f"Importér {land_code} (Excel)", type=["xlsx", "xls"], key=f"up_{land_code}")
                 if uploaded_m:
                     try:
-                        st.session_state[matrix_key] = pd.read_excel(uploaded_m, index_col=0)
+                        loaded_df = pd.read_excel(uploaded_m, index_col=0)
+                        # Konverter alle værdier til tekst med komma for ensartethed
+                        st.session_state[matrix_key] = loaded_df.applymap(lambda x: str(x).replace('.', ','))
                         st.toast(f"✅ Matrix for {land_code} indlæst!")
                     except Exception as e:
                         st.error(f"Fejl: {e}")
             
-            # Edit Matrix
+            # Edit Matrix (Nu som tekst for at tillade kommaer)
             edited_prices_dict[land_code] = st.data_editor(
                 st.session_state[matrix_key], 
                 key=f"edit_p_{land_code}", 
-                use_container_width=True,
-                column_config={
-                    col: st.column_config.NumberColumn(format="%.2f") 
-                    for col in st.session_state[matrix_key].columns
-                }
+                use_container_width=True
             )
             
             with dl_col:
@@ -431,17 +430,27 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
         if df is None: return None
         
         with st.spinner("Beregner nye priser (Vektoriseret)..."):
+            # Konverter priser fra tekst (med komma) til float (med punktum)
+            numeric_prices_dict = {}
+            for k, p_df in prices_dict.items():
+                # Brug .map() på hver kolonne for at være sikker (virker på både Series og DF)
+                numeric_prices_dict[k] = p_df.copy()
+                for col in numeric_prices_dict[k].columns:
+                    numeric_prices_dict[k][col] = numeric_prices_dict[k][col].apply(
+                        lambda x: float(str(x).replace(',', '.').strip() or 0) if isinstance(x, (str, float, int)) else 0.0
+                    )
+
             # Kopier for at undgå mutations-problemer
             df = df.copy()
             df['Ny_Pris'] = df['Aftalepris'].copy()
             df['Beregnet_Zone'] = df['_Zone'].copy()
             
             # Vi beregner land for land for at udnytte vektorisering
-            for land in prices_dict.keys():
+            for land in numeric_prices_dict.keys():
                 mask = df['Land leveringsadresse'] == land
                 if not mask.any(): continue
                 
-                pris_tabel = prices_dict[land]
+                pris_tabel = numeric_prices_dict[land]
                 if pris_tabel is None: continue
                 
                 # Præ-konverter matrix til en flad dictionary for hurtigt opslag
