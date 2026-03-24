@@ -254,10 +254,15 @@ if uploaded_files_raw or (data_source == "Manuel Estimering" and aktive_lande):
                             try:
                                 m_v = float(pd.to_numeric(ed_v.loc[s_item, w_col], errors='coerce'))
                                 if m_v > 0:
+                                    # AUTO-DETEKTER CITY/REMOTE I MANUEL MODE
+                                    is_c_man = True if "CITY" in str(s_item).upper() or "OSL" in str(s_item).upper() else False
+                                    is_r_man = True if "REMOTE" in str(s_item).upper() else False
+                                    
                                     manual_volume_data.append({
                                         'Land leveringsadresse': l_code, 'Vægt (kg)': w_steps[j], 'Aftalepris': 0.0,
                                         'Modtagers postnummer': '0000', 'Produkt': s_item, 'Mængde': m_v,
-                                        '_Zone': s_item, '_W_Idx': j, 'Vægtklasse': w_col, '_Is_Remote': False, '_Is_City': False
+                                        '_Zone': s_item, '_W_Idx': j, 'Vægtklasse': w_col, 
+                                        '_Is_Remote': is_r_man, '_Is_City': is_c_man
                                     })
                             except: pass
 
