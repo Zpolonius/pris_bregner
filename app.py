@@ -158,10 +158,8 @@ if uploaded_files_raw or (data_source == "Manuel Estimering (Indtast volumen)" a
                             l_prices = master_df[(master_df['Land leveringsadresse'] == l_code) & (master_df['Aftalepris'] > 0)]
                             w_steps = calculator.PRIS_STEPS.get(l_code, calculator.PRIS_STEPS["DK"])
                             
-                            if l_code == "SE": s_list = ["0342 PickUp Parcel Bulk", "CITY-1", "CITY-2", "SOUTH-2"]
-                            elif l_code == "NO": s_list = ["0342 PickUp Parcel Bulk", "OSL", "NOR2", "NOR3", "NOR4", "NORS"]
-                            elif l_code == "FI": s_list = ["0342 PickUp Parcel Bulk", "FI00", "FI01", "FI02", "FI04"]
-                            else: s_list = ["PickUp Parcel", "Home Delivery", "Business Parcel"]
+                            # Dynamisk indlæsning af services
+                            s_list = calculator._CONFIG.get("SERVICES", {}).get(l_code, calculator._CONFIG.get("SERVICES", {}).get("DEFAULT", []))
                             
                             m_template = pd.DataFrame(0.0, index=s_list, columns=[f"{w}kg" for w in w_steps])
                             if not l_prices.empty:
@@ -191,10 +189,8 @@ if uploaded_files_raw or (data_source == "Manuel Estimering (Indtast volumen)" a
                 l_code = str(land).upper().strip()
                 w_steps = calculator.PRIS_STEPS.get(l_code, calculator.PRIS_STEPS["DK"])
                 
-                if l_code == "SE": s_list = ["0342 PickUp Parcel Bulk", "CITY-1", "CITY-2", "SOUTH-2"]
-                elif l_code == "NO": s_list = ["0342 PickUp Parcel Bulk", "OSL", "NOR2", "NOR3", "NOR4", "NORS"]
-                elif l_code == "FI": s_list = ["0342 PickUp Parcel Bulk", "FI00", "FI01", "FI02", "FI04"]
-                else: s_list = ["PickUp Parcel", "Home Delivery", "Business Parcel"]
+                # Dynamisk indlæsning af services
+                s_list = calculator._CONFIG.get("SERVICES", {}).get(l_code, calculator._CONFIG.get("SERVICES", {}).get("DEFAULT", []))
                 
                 m_key = f"m_data_{l_code}_{model_type}"
                 if m_key not in st.session_state:
