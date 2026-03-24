@@ -215,7 +215,8 @@ if uploaded_files_raw or (data_source == "Manuel Estimering" and aktive_lande):
                     for l_code in aktive_lande:
                         m_key = f"m_data_{l_code}_{model_type}"
                         for s_name in sheet_names:
-                            if l_code.upper() in s_name.upper():
+                            # TYPE FIX: Tving til str for at undgå fejl ved numeriske arknavne
+                            if str(l_code).upper() in str(s_name).upper():
                                 try:
                                     new_m = pd.read_excel(global_matrix_file, sheet_name=s_name, index_col=0)
                                     st.session_state[m_key] = new_m.map(lambda x: str(x).replace('.', ','))
