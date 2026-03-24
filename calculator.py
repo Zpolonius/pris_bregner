@@ -4,15 +4,13 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 
-# Indlæs konfiguration
 def load_config() -> dict:
     config_path = "config.json"
     if os.path.exists(config_path):
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
-            pass
+        except: pass
     return {}
 
 _CONFIG = load_config()
@@ -24,21 +22,17 @@ PRIS_STEPS = _CONFIG.get("PRIS_STEPS", {
 })
 
 def get_weight_bracket(weight: float, w_steps: list[float]) -> str:
-    """Beregner hvilken vægtklasse pakken tilhører til oversigten"""
     if weight == 0: return "0 kg (Gebyr/Info)"
     prev = 0.0
     for step in w_steps:
-        if weight <= step:
-            return f"{prev}-{step} kg"
+        if weight <= step: return f"{prev}-{step} kg"
         prev = step
     return f">{w_steps[-1]} kg"
 
-def calculate_results(df: pd.DataFrame | None, prices_dict: dict, model_type: str, adj_type: str, adj_val: float) -> pd.DataFrame | None:
-    """Den store beregningsmotor (Vektoriseret for hastighed)"""
+def calculate_results(df: pd.DataFrame | None, prices_dict: dict, model_type: str, adj_type: str, adj_val: float, remote_fee: float = 0.0, city_fee: float = 0.0) -> pd.DataFrame | None:
     if df is None: return None
     
     try:
-        # Konverter priser fra tekst (med komma) til float
         numeric_prices_dict = {}
         for k, p_df in prices_dict.items():
             numeric_prices_dict[k] = p_df.copy()
@@ -47,11 +41,9 @@ def calculate_results(df: pd.DataFrame | None, prices_dict: dict, model_type: st
                     lambda x: float(str(x).replace(',', '.').strip() or 0) if isinstance(x, (str, float, int)) else 0.0
                 )
 
-        # Kopier for at undgå mutations-problemer
         df_res = df.copy()
         df_res['Ny_Pris'] = df_res['Aftalepris'].copy()
         
-        # Beregn land for land
         for land in numeric_prices_dict.keys():
             mask = df_res['Land leveringsadresse'] == land
             if not mask.any(): continue
@@ -73,9 +65,11 @@ def calculate_results(df: pd.DataFrame | None, prices_dict: dict, model_type: st
             s_indices = np.array([fast_service_map(p, z) for p, z in zip(land_subset['Produkt'], land_subset['_Zone'])])
             w_indices = land_subset['_W_Idx'].to_numpy(dtype=int)
             
-            # Skudsikker valid_mask
             w_arr = land_subset['Vægt (kg)'].to_numpy(dtype=np.float64)
             p_arr = land_subset['Aftalepris'].to_numpy(dtype=np.float64)
+            is_r_arr = land_subset['_Is_Remote'].to_numpy(dtype=bool) if '_Is_Remote' in land_subset else np.zeros(len(land_subset), dtype=bool)
+            is_c_arr = land_subset['_Is_City'].to_numpy(dtype=bool) if '_Is_City' in land_subset else np.zeros(len(land_subset), dtype=bool)
+            
             valid_mask = (w_arr > 0) & (p_arr > 0) & (~np.isnan(w_arr))
             
             if valid_mask.any():
@@ -83,11 +77,18 @@ def calculate_results(df: pd.DataFrame | None, prices_dict: dict, model_type: st
                 col_idx = w_indices[valid_mask]
                 if "Enhedspris" in model_type: col_idx = 0 
                 
+                # Grundpris fra matrix
                 bases = price_matrix[row_idx, col_idx]
+                
+                # Procentvis eller fast justering
                 if adj_type == "Procent (%)":
                     new_vals = bases * (1 + adj_val / 100)
                 else:
                     new_vals = bases + adj_val
+                
+                # Tilføj Remote/City tillæg (Fast beløb oveni den beregnede pris)
+                new_vals += (is_r_arr[valid_mask] * remote_fee)
+                new_vals += (is_c_arr[valid_mask] * city_fee)
                 
                 final_prices = p_arr.copy()
                 final_prices[valid_mask] = new_vals
@@ -95,6 +96,5 @@ def calculate_results(df: pd.DataFrame | None, prices_dict: dict, model_type: st
         
         return df_res
     except Exception as e:
-        st.error("💣 **Ups! Fejl i beregning.**")
-        print(f"Calculation error: {e}")
+        st.error(f"💣 **Fejl i beregning:** {e}")
         return df
