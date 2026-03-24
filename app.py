@@ -162,7 +162,10 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
                     temp_df.columns = [str(c).strip() for c in temp_df.columns]
                     dfs.append(temp_df)
                 except Exception as e:
-                    st.error(f"Fejl ved indlæsning af {f.name}: {e}")
+                    st.error(f"**Kunne ikke læse filen: {f.name}** 🧐")
+                    st.info("Dette skyldes typisk at filen er åben i et andet program eller har et ukendt format. Prøv at gemme den igen som en standard CSV eller Excel-fil.")
+                    # Vi logger fejlen internt hvis det er nødvendigt, men viser den ikke råt til brugeren
+                    print(f"Debug: {e}")
             
             if not dfs:
                 st.stop()
@@ -172,11 +175,11 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
 
             # --- KOLONNE MAPPING (Sikkerhedsventil for sælgere) ---
             required_cols = {
-                'Land leveringsadresse': ['Land leveringsadresse', 'Country', 'Land'],
-                'Vægt (kg)': ['Vægt (kg)', 'Vægt', 'Weight'],
-                'Aftalepris': ['Aftalepris', 'Pris', 'Price', 'Faktureret beløb'],
-                'Modtagers postnummer': ['Modtagers postnummer', 'Postnummer', 'Zip', 'Zip code'],
-                'Produkt': ['Produkt', 'Product', 'Service']
+                'Land leveringsadresse': ['Land leveringsadresse', 'Country', 'Land', 'Mottakerland', 'Mottagarland', 'Receiver Country', 'Land (leveringsadresse)'],
+                'Vægt (kg)': ['Vægt (kg)', 'Vægt', 'Weight', 'Vekt', 'Vikt', 'Weight (kg)', 'Vekt (kg)', 'Vikt (kg)'],
+                'Aftalepris': ['Aftalepris', 'Pris', 'Price', 'Faktureret beløb', 'Avtalspris', 'Avtalepris', 'Beløp', 'Belopp', 'Amount', 'Nettobeløp'],
+                'Modtagers postnummer': ['Modtagers postnummer', 'Postnummer', 'Zip', 'Zip code', 'Mottakers postnr', 'Mottagarens postnr', 'Postnr', 'Postal code', 'Mottakers postnummer'],
+                'Produkt': ['Produkt', 'Product', 'Service', 'Tjeneste', 'Tjänst', 'Tjenestetype']
             }
             
             mapping = {}
@@ -194,7 +197,7 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
 
             if missing_cols:
                 st.warning("⚠️ **Vigtigt:** Vi kunne ikke finde alle de nødvendige oplysninger i din fil automatisk.")
-                with st.expander("Klik her for at hjælpe appen med at finde de rigtige kolonner"):
+                with st.expander("Klik her for at hjælpe appen med at finde de rigtige kolonner", expanded=True):
                     for col in missing_cols:
                         mapping[col] = st.selectbox(f"Hvilken kolonne i din fil svarer til '{col}'?", master_df.columns, key=f"map_{col}")
             
@@ -359,12 +362,19 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
                 if uploaded_m:
                     try:
                         loaded_df = pd.read_excel(uploaded_m, index_col=0)
-                        # Konverter alle værdier til tekst med komma for ensartethed på en sikker måde
-                        st.session_state[matrix_key] = loaded_df.map(lambda x: str(x).replace('.', ','))
-                        st.toast(f"✅ Matrix for {land_code} indlæst!")
+
+                        # Tjek om vi har det rigtige antal vægttrin (kolonner)
+                        if not "Enhedspris" in model_type and len(loaded_df.columns) != len(w_steps):
+                             st.error(f"⚠️ **Forkert format i {land_code}-matrix!**")
+                             st.info(f"Vi forventede {len(w_steps)} vægttrin-kolonner, men fandt {len(loaded_df.columns)}. Sørg for at den uploadede fil matcher skabelonen herunder.")
+                        else:
+                            # Konverter alle værdier til tekst med komma for ensartethed på en sikker måde
+                            st.session_state[matrix_key] = loaded_df.map(lambda x: str(x).replace('.', ','))
+                            st.toast(f"✅ Matrix for {land_code} indlæst!")
                     except Exception as e:
-                        st.error(f"Fejl: {e}")
-            
+                        st.error("🤯 **Hov! Der skete noget mærkeligt ved indlæsning af priserne.**")
+                        st.info("Sørg for at filen ikke er låst, og at den indeholder en pristabel med zoner i første kolonne.")
+                        print(f"Debug Matrix Error: {e}")            
             # Edit Matrix (Nu som tekst for at tillade kommaer)
             edited_prices_dict[land_code] = st.data_editor(
                 st.session_state[matrix_key], 
@@ -429,82 +439,74 @@ if uploaded_files or (data_source == "Manuel Estimering (Indtast volumen)" and v
     def calculate_results(df, prices_dict):
         if df is None: return None
         
-        with st.spinner("Beregner nye priser (Vektoriseret)..."):
-            # Konverter priser fra tekst (med komma) til float (med punktum)
-            numeric_prices_dict = {}
-            for k, p_df in prices_dict.items():
-                # Brug .map() på hver kolonne for at være sikker (virker på både Series og DF)
-                numeric_prices_dict[k] = p_df.copy()
-                for col in numeric_prices_dict[k].columns:
-                    numeric_prices_dict[k][col] = numeric_prices_dict[k][col].apply(
-                        lambda x: float(str(x).replace(',', '.').strip() or 0) if isinstance(x, (str, float, int)) else 0.0
-                    )
+        try:
+            with st.spinner("Beregner nye priser (Vektoriseret)..."):
+                # Konverter priser fra tekst (med komma) til float (med punktum)
+                numeric_prices_dict = {}
+                for k, p_df in prices_dict.items():
+                    # Brug .map() på hver kolonne for at være sikker (virker på både Series og DF)
+                    numeric_prices_dict[k] = p_df.copy()
+                    for col in numeric_prices_dict[k].columns:
+                        numeric_prices_dict[k][col] = numeric_prices_dict[k][col].apply(
+                            lambda x: float(str(x).replace(',', '.').strip() or 0) if isinstance(x, (str, float, int)) else 0.0
+                        )
 
-            # Kopier for at undgå mutations-problemer
-            df = df.copy()
-            df['Ny_Pris'] = df['Aftalepris'].copy()
-            df['Beregnet_Zone'] = df['_Zone'].copy()
-            
-            # Vi beregner land for land for at udnytte vektorisering
-            for land in numeric_prices_dict.keys():
-                mask = df['Land leveringsadresse'] == land
-                if not mask.any(): continue
+                # Kopier for at undgå mutations-problemer
+                df = df.copy()
+                df['Ny_Pris'] = df['Aftalepris'].copy()
+                df['Beregnet_Zone'] = df['_Zone'].copy()
                 
-                pris_tabel = numeric_prices_dict[land]
-                if pris_tabel is None: continue
-                
-                # Præ-konverter matrix til en flad dictionary for hurtigt opslag
-                # Dette er meget hurtigere end .loc inde i en loop
-                price_matrix = pris_tabel.values
-                services_list = pris_tabel.index.tolist()
-                
-                # Vi finder servicen for alle rækker i dette land én gang
-                land_subset = df[mask].copy()
-                
-                # 1. Præ-beregn zone/service mapping (meget hurtigere end vectorize)
-                # Vi skaber en mapping serie fra Produkterne
-                service_map = {}
-                for s in services_list:
-                    service_map[s] = services_list.index(s)
-                
-                # Default mapping
-                def fast_service_map(p, z):
-                    if z in service_map: return service_map[z]
-                    p_str = str(p)
-                    if "PickUp" in p_str:
-                        if "0342 PickUp Parcel Bulk" in service_map: return service_map["0342 PickUp Parcel Bulk"]
-                        if "PickUp Parcel" in service_map: return service_map["PickUp Parcel"]
-                    return 0
+                # Vi beregner land for land for at udnytte vektorisering
+                for land in numeric_prices_dict.keys():
+                    mask = df['Land leveringsadresse'] == land
+                    if not mask.any(): continue
+                    
+                    pris_tabel = numeric_prices_dict[land]
+                    if pris_tabel is None: continue
+                    
+                    # Præ-konverter matrix til en flad dictionary for hurtigt opslag
+                    price_matrix = pris_tabel.values
+                    services_list = pris_tabel.index.tolist()
+                    
+                    # Vi finder servicen for alle rækker i dette land én gang
+                    land_subset = df[mask].copy()
+                    
+                    # 1. Præ-beregn zone/service mapping (meget hurtigere end vectorize)
+                    def fast_service_map(p, z):
+                        # Vi bruger en simpel mapping dict for fart
+                        if z in services_list: return services_list.index(z)
+                        p_str = str(p)
+                        if "PickUp" in p_str:
+                            if "0342 PickUp Parcel Bulk" in services_list: return services_list.index("0342 PickUp Parcel Bulk")
+                            if "PickUp Parcel" in services_list: return services_list.index("PickUp Parcel")
+                        return 0
 
-                # Hurtig række-baseret mapping (kun for dette lands subset)
-                s_indices = np.array([fast_service_map(p, z) for p, z in zip(land_subset['Produkt'], land_subset['_Zone'])])
-                w_indices = land_subset['_W_Idx'].values.astype(int)
+                    # Hurtig række-baseret mapping
+                    s_indices = np.array([fast_service_map(p, z) for p, z in zip(land_subset['Produkt'], land_subset['_Zone'])])
+                    w_indices = land_subset['_W_Idx'].values.astype(int)
+                    
+                    valid_mask = (land_subset['Vægt (kg)'].values > 0) & (land_subset['Aftalepris'].values > 0)
+                    
+                    if valid_mask.any():
+                        row_idx = s_indices[valid_mask]
+                        col_idx = w_indices[valid_mask]
+                        if "Enhedspris" in model_type: col_idx = 0 
+                        
+                        bases = price_matrix[row_idx, col_idx]
+                        if adj_type == "Procent (%)":
+                            new_vals = bases * (1 + adj_val / 100)
+                        else:
+                            new_vals = bases + adj_val
+                        
+                        final_prices = land_subset['Aftalepris'].values.copy()
+                        final_prices[valid_mask] = new_vals
+                        df.loc[mask, 'Ny_Pris'] = final_prices
                 
-                # Kun beregn for pakker med vægt > 0
-                valid_mask = (land_subset['Vægt (kg)'].values > 0) & (land_subset['Aftalepris'].values > 0)
-                
-                if valid_mask.any():
-                    # Træk priserne direkte fra den rå numpy matrix (Lynhurtigt!)
-                    row_idx = s_indices[valid_mask]
-                    col_idx = w_indices[valid_mask]
-                    
-                    if "Enhedspris" in model_type:
-                        col_idx = 0 
-                    
-                    # Hent priserne fra matrix via advanced indexing
-                    bases = price_matrix[row_idx, col_idx]
-                    
-                    # Anvend justeringer
-                    if adj_type == "Procent (%)":
-                        new_vals = bases * (1 + adj_val / 100)
-                    else:
-                        new_vals = bases + adj_val
-                    
-                    # Skriv tilbage
-                    final_prices = land_subset['Aftalepris'].values.copy()
-                    final_prices[valid_mask] = new_vals
-                    df.loc[mask, 'Ny_Pris'] = final_prices
-            
+                return df
+        except Exception as e:
+            st.error("💣 **Ups! Der skete en fejl i beregnings-motoren.**")
+            st.info("Dette skyldes oftest ugyldige værdier i dine priseditorer (f.eks. tekst i et talfelt). Prøv at tjekke dine priser igennem.")
+            print(f"Calculation error: {e}")
             return df
 
     # UI LOGIK: For store filer skal man trykke på en knap for at undgå lag
