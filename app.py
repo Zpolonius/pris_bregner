@@ -95,6 +95,11 @@ if uploaded_files_raw or (data_source == "Manuel Estimering (Indtast volumen)" a
                 'Aftalepris': ['Aftalepris', 'Pris', 'Price', 'Faktureret beløb', 'Avtalspris', 'Avtalepris', 'Beløp', 'Belopp', 'Amount', 'Nettobeløp'],
                 'Modtagers postnummer': ['Modtagers postnummer', 'Postnummer', 'Zip', 'Zip code', 'Mottakers postnr', 'Mottagarens postnr', 'Postnr', 'Postal code', 'Mottakers postnummer'],
                 'Produkt': ['Produkt', 'Product', 'Service', 'Tjeneste', 'Tjänst', 'Tjenestetype']
+                'Land leveringsadresse': ['Land leveringsadresse', 'Country', 'Land', 'Mottakerland', 'Mottagarland', 'Receiver Country', 'Land (leveringsadresse)'],
+                'Vægt (kg)': ['Vægt (kg)', 'Vægt', 'Weight', 'Vekt', 'Vikt', 'Weight (kg)', 'Vekt (kg)', 'Vikt (kg)'],
+                'Aftalepris': ['Aftalepris', 'Pris', 'Price', 'Faktureret beløb', 'Avtalspris', 'Avtalepris', 'Beløp', 'Belopp', 'Amount', 'Nettobeløp'],
+                'Modtagers postnummer': ['Modtagers postnummer', 'Postnummer', 'Zip', 'Zip code', 'Mottakers postnr', 'Mottagarens postnr', 'Postnr', 'Postal code', 'Mottakers postnummer'],
+                'Produkt': ['Produkt', 'Product', 'Service', 'Tjeneste', 'Tjänst', 'Tjenestetype']
             }
             
             mapping: Dict[str, str] = {}
