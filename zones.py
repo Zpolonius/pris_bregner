@@ -1,12 +1,19 @@
-import pandas as pd
+import json
+import os
 
-# Mapping af zoner baseret på postnummer
-# Dette kan senere flyttes til en JSON/Excel konfigurationsfil
-ZONE_MAPS = {
+# Indlæs konfiguration (Fallback til standard hvis filen mangler)
+def load_config():
+    config_path = "config.json"
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+_CONFIG = load_config()
+ZONE_MAPS = _CONFIG.get("ZONE_MAPS", {
     "SE": {"00": "CITY-1", "10": "CITY-1", "20": "CITY-2", "40": "CITY-2", "DEFAULT": "SOUTH-2"},
-    "NO": {"00": "OSL", "01": "OSL", "10": "OSL", "13": "NOR2", "20": "NOR2", "40": "NOR3", "80": "NOR4", "90": "NORS", "DEFAULT": "NOR2"},
     "FI": {"00": "FI00", "45": "FI01", "80": "FI02", "94": "FI04", "DEFAULT": "FI01"}
-}
+})
 
 def get_zone(row, country):
     """Beregner zone baseret på land og postnummer"""

@@ -1,14 +1,24 @@
+import json
+import os
 import pandas as pd
 import numpy as np
 import streamlit as st
 
-# --- KONFIGURATION (Zoner & Vægttrin) ---
-PRIS_STEPS = {
+# Indlæs konfiguration (Fallback til standard hvis filen mangler)
+def load_config():
+    config_path = "config.json"
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+_CONFIG = load_config()
+PRIS_STEPS = _CONFIG.get("PRIS_STEPS", {
     "DK": [1, 3, 5, 10, 15, 20, 25, 30, 35],
     "SE": [1, 3, 6, 10, 15, 20, 30, 50, 60, 70],
     "NO": [1, 2, 5, 8, 12, 16, 20, 30, 40, 50],
     "FI": [1, 3, 6, 10, 15, 20, 30, 40, 50, 63]
-}
+})
 
 def get_weight_bracket(weight, w_steps):
     """Beregner hvilken vægtklasse pakken tilhører til oversigten"""
@@ -37,7 +47,6 @@ def calculate_results(df, prices_dict, model_type, adj_type, adj_val):
         # Kopier for at undgå mutations-problemer
         df = df.copy()
         df['Ny_Pris'] = df['Aftalepris'].copy()
-        df['Beregnet_Zone'] = df['_Zone'].copy()
         
         # Beregn land for land
         for land in numeric_prices_dict.keys():
