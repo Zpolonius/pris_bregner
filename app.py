@@ -126,6 +126,35 @@ if uploaded_files_raw or (data_source == "Manuel Estimering (Indtast volumen)" a
 
             aktive_lande = sorted([str(l) for l in master_df['Land leveringsadresse'].unique() if str(l) not in ['UKENDT', '0.0']])
             
+            # --- 📋 DATA HEALTH DASHBOARD ---
+            st.subheader("📊 Data Health Dashboard")
+            with st.expander("Se analyse af datakvalitet og håndtering", expanded=False):
+                col_h1, col_h2, col_h3 = st.columns(3)
+                
+                # 1. Postnumre & Zoner (Tjekker om zonen indeholder "Zone 1" eller "Standard")
+                # Vi skal først køre zonelogikken for at kunne vise dette dashboard korrekt
+                master_df['_Zone'] = master_df.apply(lambda r: zones.get_zone(r, r['Land leveringsadresse']), axis=1)
+                invalid_zips = master_df[master_df['_Zone'].str.contains("Zone 1", na=False)].shape[0]
+                
+                with col_h1:
+                    st.metric("Ugyldige Postnumre", invalid_zips, delta="Sat til Default" if invalid_zips > 0 else None, delta_color="off")
+                    st.caption(f"ℹ️ {invalid_zips} pakker havde ukendte postnumre og er tildelt landets standard-zone.")
+
+                # 2. 0-Kilos reglen (Gebyrer)
+                gebyr_linjer = master_df[(master_df['Vægt (kg)'] == 0) | (master_df['Aftalepris'] == 0)].shape[0]
+                with col_h2:
+                    st.metric("Gebyrer/Info-linjer", gebyr_linjer, help="Linjer med 0 kg eller 0 kr. i pris.")
+                    st.caption(f"ℹ️ {gebyr_linjer} linjer bevarer deres oprindelige pris uændret (0-kilos reglen).")
+
+                # 3. Datakomplethed
+                total_rows = master_df.shape[0]
+                missing_data = master_df[master_df['Aftalepris'].isna() | (master_df['Vægt (kg)'].isna())].shape[0]
+                with col_h3:
+                    health_pct = int(((total_rows - missing_data) / total_rows) * 100) if total_rows > 0 else 0
+                    st.metric("Data Sundhed", f"{health_pct}%")
+                    if missing_data > 0:
+                        st.warning(f"⚠️ {missing_data} rækker mangler kritiske tal.")
+            
             # Præ-beregning
             if isinstance(uploaded_files_raw, list) and len(uploaded_files_raw) > 0:
                 f_names = [getattr(f, 'name', 'file') for f in uploaded_files_raw]
