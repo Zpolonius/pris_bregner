@@ -14,7 +14,7 @@ def load_config():
 
 _CONFIG = load_config()
 
-# @st.cache_data
+@st.cache_data
 def get_all_intervals():
     intervals = {
         "SE_STOCKHOLM": [], "SE_GOTEBORG": [], "NO_OSLO": [],
