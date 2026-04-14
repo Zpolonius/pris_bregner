@@ -9,17 +9,17 @@
 ### 🌍 Intelligent Nordisk Zone-Mapping
 Applikationen indeholder en sofistikeret zone-motor, der håndterer over 1.100 specifikke postnummer-regler for Danmark, Sverige, Norge og Finland:
 *   **Sverige:** Opdelt i 9 geografiske zoner (`CITY-1-3`, `SOUTH-1-3`, `NORTH-1-3`).
-*   **Norge:** Fuld integration af Oslo-regionen samt standardzonerne `NOR2` til `NORS`.
-*   **Tillægshåndtering:** Automatisk identifikation af **City Surcharge** og **Remote Area Surcharge** områder via præcise interval-opslag fra officielle Master-filer.
+*   **Norge:** Fuld 2026-integration med alle officielle City Surcharge og Remote Area intervaller udtrukket direkte fra Brings lister.
+*   **Tillægshåndtering:** Automatisk identifikation af **City Surcharge** og **Remote Area Surcharge** områder via præcise opslag mod PDF-synkroniserede Master-filer.
 
 ### 💰 Avanceret Pris-simulering
+*   **Auto-mapping:** Systemet genkender automatisk dine Excel-kolonner (f.eks. `WEIGHT`, `RECEIVER_ZIP_CODE`, `CARRIER_SERVICE`) og normaliserer landenavne som "Norge" og "Sverige" til korrekte ISO-koder.
 *   **Multi-model Support:** Vælg mellem enhedspriser eller komplekse vægt-matricer.
 *   **Vektoriseret Beregning:** Drevet af Numpy for lynhurtig behandling af selv meget store Excel/CSV-rapporter (10.000+ rækker).
 *   **Forhandlings-værktøjer:** Globale skydere til justering af procenter, faste tillæg og forventet volumen-vækst.
-*   **Specifikke Tillæg:** Justér prisen på City- og Remote Area-tillæg uafhængigt af grundprisen.
 
 ### 📊 Data Health & Rapportering
-*   **Data Health Dashboard:** Giver øjeblikkelig feedback på datakvaliteten, herunder identifikation af gebyr-linjer (0-kilos reglen) og ukendte postnumre.
+*   **Data Health Dashboard:** Giver øjeblikkelig feedback på datakvaliteten, herunder præcise antal og **procentvise andele** af pakker, der rammer surcharge-zoner og gebyr-linjer.
 *   **Eksport:** Generer professionelle Excel-rapporter med fuldt gennemsigtige beregninger, klar til præsentation for kunden.
 
 ---
