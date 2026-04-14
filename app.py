@@ -98,10 +98,10 @@ if uploaded_files_raw or (data_source == "Manuel Estimering" and aktive_lande):
         if master_df is not None:
             required_cols = {
                 'Land leveringsadresse': ['Land leveringsadresse', 'Country', 'Land', 'Mottakerland', 'Mottagarland', 'Receiver Country'],
-                'Vægt (kg)': ['Vægt (kg)', 'Vægt', 'Weight', 'Vekt', 'Vikt'],
-                'Aftalepris': ['Aftalepris', 'Pris', 'Price', 'Faktureret beløb', 'Nettobeløp'],
-                'Modtagers postnummer': ['Modtagers postnummer', 'Postnummer', 'Zip', 'Zip code', 'Postnr'],
-                'Produkt': ['Produkt', 'Product', 'Service', 'Tjeneste', 'Tjänst']
+                'Vægt (kg)': ['Vægt (kg)', 'Vægt', 'Weight', 'Vekt', 'Vikt', 'WEIGHT'],
+                'Aftalepris': ['Aftalepris', 'Pris', 'Price', 'Faktureret beløb', 'Nettobeløp', 'Beløb', 'Amount'],
+                'Modtagers postnummer': ['Modtagers postnummer', 'Postnummer', 'Zip', 'Zip code', 'Postnr', 'RECEIVER_ZIP_CODE', 'Receiver Zip'],
+                'Produkt': ['Produkt', 'Product', 'Service', 'Tjeneste', 'Tjänst', 'CARRIER_SERVICE', 'CARRIER_PRODUCT']
             }
             
             mapping: dict[str, str] = {}
@@ -117,8 +117,16 @@ if uploaded_files_raw or (data_source == "Manuel Estimering" and aktive_lande):
             
             master_df = master_df.rename(columns={v: k for k, v in mapping.items()})
 
-            # Rens
+            # Rens og Normaliser Land
+            country_map = {
+                'DANMARK': 'DK', 'DENMARK': 'DK', 'DK': 'DK',
+                'SVERIGE': 'SE', 'SWEDEN': 'SE', 'SE': 'SE',
+                'NORGE': 'NO', 'NORWAY': 'NO', 'NO': 'NO',
+                'FINLAND': 'FI', 'SUOMI': 'FI', 'FI': 'FI'
+            }
             master_df['Land leveringsadresse'] = master_df['Land leveringsadresse'].fillna('UKENDT').astype(str).str.strip().str.upper()
+            master_df['Land leveringsadresse'] = master_df['Land leveringsadresse'].map(lambda x: country_map.get(x, x))
+            
             for col in ['Vægt (kg)', 'Aftalepris']:
                 if col in master_df.columns:
                     master_df[col] = pd.to_numeric(master_df[col].astype(str).str.replace(' ', '').str.replace(',', '.'), errors='coerce').fillna(0.0)
