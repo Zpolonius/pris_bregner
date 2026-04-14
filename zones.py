@@ -14,14 +14,14 @@ def load_config():
 
 _CONFIG = load_config()
 
-@st.cache_data
+# @st.cache_data
 def get_all_intervals():
     intervals = {
         "SE_STOCKHOLM": [], "SE_GOTEBORG": [], "NO_OSLO": [],
         "REMOTE_SE": [], "REMOTE_NO": []
     }
     if os.path.exists("Master_City_Surcharge.csv"):
-        with open("Master_City_Surcharge.csv", "r", encoding="utf-8-sig") as f:
+        with open("Master_City_Surcharge.csv", "r", encoding="utf-8") as f:
             reader = csv.DictReader(f, delimiter=';')
             for row in reader:
                 try:
@@ -32,7 +32,7 @@ def get_all_intervals():
                     else: intervals["NO_OSLO"].append((min(s,t), max(s,t)))
                 except: continue
     if os.path.exists("Master_Remote_Surcharge.csv"):
-        with open("Master_Remote_Surcharge.csv", "r", encoding="utf-8-sig") as f:
+        with open("Master_Remote_Surcharge.csv", "r", encoding="utf-8") as f:
             reader = csv.DictReader(f, delimiter=';')
             for row in reader:
                 try:

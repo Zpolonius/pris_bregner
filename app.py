@@ -149,11 +149,14 @@ if uploaded_files_raw or (data_source == "Manuel Estimering" and aktive_lande):
                 city_count = master_df['_Is_City'].sum()
                 
                 with col_h1:
-                    st.metric("Remote Area Pakker", int(remote_count))
-                    st.caption(f"ℹ️ {int(remote_count)} pakker udløser Remote tillæg.")
+                    remote_pct = (remote_count / len(master_df) * 100) if len(master_df) > 0 else 0
+                    st.metric("Remote Area Pakker", f"{int(remote_count)} stk.", f"{remote_pct:.1f}% af total", delta_color="off")
+                    st.caption(f"ℹ️ {int(remote_count)} pakker til fjerntliggende områder.")
                 with col_h2:
-                    st.metric("City Surcharge Pakker", int(city_count))
+                    city_pct = (city_count / len(master_df) * 100) if len(master_df) > 0 else 0
+                    st.metric("City Surcharge Pakker", f"{int(city_count)} stk.", f"{city_pct:.1f}% af total", delta_color="off")
                     st.caption(f"ℹ️ {int(city_count)} pakker udløser City tillæg.")
+
                 with col_h3:
                     health_pct = int(((len(master_df) - master_df['Aftalepris'].isna().sum()) / len(master_df)) * 100) if len(master_df) > 0 else 0
                     st.metric("Data Sundhed", f"{health_pct}%")
