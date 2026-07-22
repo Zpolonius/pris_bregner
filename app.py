@@ -138,26 +138,32 @@ if uploaded_files_raw or (data_source == "Manuel Estimering" and aktive_lande):
             # --- 📊 DATA HEALTH DASHBOARD ---
             st.subheader("📊 Data Health Dashboard")
             with st.expander("Se analyse af datakvalitet", expanded=False):
-                col_h1, col_h2, col_h3 = st.columns(3)
+                col_h1, col_h2, col_h3, col_h4 = st.columns(4)
                 # Kør den avancerede zonelogik her
                 res = master_df.apply(lambda r: zones.get_zone_info(r, r['Land leveringsadresse']), axis=1)
                 master_df['_Zone'] = [x[0] for x in res]
                 master_df['_Is_Remote'] = [x[1] for x in res]
                 master_df['_Is_City'] = [x[2] for x in res]
                 
-                remote_count = master_df['_Is_Remote'].sum()
-                city_count = master_df['_Is_City'].sum()
+                has_weight = master_df['Vægt (kg)'] > 0
+                real_pkg_count = has_weight.sum()
+                fee_count = len(master_df) - real_pkg_count
+                
+                remote_count = (master_df['_Is_Remote'] & has_weight).sum()
+                city_count = (master_df['_Is_City'] & has_weight).sum()
                 
                 with col_h1:
-                    remote_pct = (remote_count / len(master_df) * 100) if len(master_df) > 0 else 0
-                    st.metric("Remote Area Pakker", f"{int(remote_count)} stk.", f"{remote_pct:.1f}% af total", delta_color="off")
-                    st.caption(f"ℹ️ {int(remote_count)} pakker til fjerntliggende områder.")
+                    st.metric("Reelle Pakker (>0 kg)", f"{int(real_pkg_count):,} stk.")
+                    st.caption(f"ℹ️ Ekskl. {int(fee_count)} gebyr-/info-linjer uden vægt.")
                 with col_h2:
-                    city_pct = (city_count / len(master_df) * 100) if len(master_df) > 0 else 0
-                    st.metric("City Surcharge Pakker", f"{int(city_count)} stk.", f"{city_pct:.1f}% af total", delta_color="off")
-                    st.caption(f"ℹ️ {int(city_count)} pakker udløser City tillæg.")
-
+                    remote_pct = (remote_count / real_pkg_count * 100) if real_pkg_count > 0 else 0
+                    st.metric("Remote Area Pakker", f"{int(remote_count):,} stk.", f"{remote_pct:.1f}% af pakker", delta_color="off")
+                    st.caption(f"ℹ️ {int(remote_count)} pakker til fjerntliggende områder.")
                 with col_h3:
+                    city_pct = (city_count / real_pkg_count * 100) if real_pkg_count > 0 else 0
+                    st.metric("City Surcharge Pakker", f"{int(city_count):,} stk.", f"{city_pct:.1f}% af pakker", delta_color="off")
+                    st.caption(f"ℹ️ {int(city_count)} pakker udløser City tillæg.")
+                with col_h4:
                     health_pct = int(((len(master_df) - master_df['Aftalepris'].isna().sum()) / len(master_df)) * 100) if len(master_df) > 0 else 0
                     st.metric("Data Sundhed", f"{health_pct}%")
             
@@ -184,7 +190,7 @@ if uploaded_files_raw or (data_source == "Manuel Estimering" and aktive_lande):
                         for l_code in aktive_lande:
                             m_key = f"m_data_{l_code}_{model_type}"
                             if m_key not in st.session_state:
-                                l_prices = master_df[(master_df['Land leveringsadresse'] == l_code) & (master_df['Aftalepris'] > 0)]
+                                l_prices = master_df[(master_df['Land leveringsadresse'] == l_code) & (master_df['Aftalepris'] > 0) & (master_df['Vægt (kg)'] > 0)]
                                 w_steps = calculator.PRIS_STEPS.get(l_code, calculator.PRIS_STEPS["DK"])
                                 s_list = calculator._CONFIG.get("SERVICES", {}).get(l_code, calculator._CONFIG.get("SERVICES", {}).get("DEFAULT", []))
                                 m_template = pd.DataFrame(0.0, index=s_list, columns=[f"{w}kg" for w in w_steps])
@@ -298,13 +304,19 @@ if uploaded_files_raw or (data_source == "Manuel Estimering" and aktive_lande):
                 old_a = master_df['Aftalepris'].to_numpy(dtype=np.float64)
                 new_a = master_df['Ny_Pris'].to_numpy(dtype=np.float64)
                 qty_a = master_df['Mængde'].to_numpy(dtype=np.float64)
+                w_a = master_df['Vægt (kg)'].to_numpy(dtype=np.float64)
+                
                 t_old = np.sum(np.multiply(old_a, qty_a)) * vol_multiplier
                 t_new = np.sum(np.multiply(new_a, qty_a)) * vol_multiplier
                 t_diff = t_new - t_old
-                t_cnt = np.sum(qty_a) * vol_multiplier
+                
+                # Pakkeoptælling: KUN pakker med vægt > 0 kg
+                pkg_mask = w_a > 0
+                t_cnt = np.sum(qty_a[pkg_mask]) * vol_multiplier
+                fee_cnt = np.sum(qty_a[~pkg_mask]) * vol_multiplier
                 
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Antal Pakker", f"{int(t_cnt):,}")
+                c1.metric("Antal Pakker (>0 kg)", f"{int(t_cnt):,}", help=f"Ekskl. {int(fee_cnt):,} gebyr-/info-linjer (0 kg)")
                 c2.metric("Nuværende Omsætning", f"{t_old:,.0f} kr.")
                 c3.metric("Ny Aftale", f"{t_new:,.0f} kr.", delta=f"{t_diff:,.0f} kr.", delta_color="inverse")
                 if t_old > 0:
@@ -316,8 +328,27 @@ if uploaded_files_raw or (data_source == "Manuel Estimering" and aktive_lande):
                 st.subheader("Oversigt pr. Land")
                 master_df['W_Old'] = np.multiply(master_df['Aftalepris'].to_numpy(dtype=np.float64), master_df['Mængde'].to_numpy(dtype=np.float64)) * vol_multiplier
                 master_df['W_New'] = np.multiply(master_df['Ny_Pris'].to_numpy(dtype=np.float64), master_df['Mængde'].to_numpy(dtype=np.float64)) * vol_multiplier
-                brk = master_df.groupby('Land leveringsadresse')[['W_Old', 'W_New']].sum()
-                st.dataframe(brk.style.format("{:,.0f}"), use_container_width=True)
+                master_df['Pakker_Count'] = np.where(master_df['Vægt (kg)'].to_numpy(dtype=np.float64) > 0, master_df['Mængde'].to_numpy(dtype=np.float64), 0.0) * vol_multiplier
+                
+                brk = master_df.groupby('Land leveringsadresse').agg(
+                    Pakker=('Pakker_Count', 'sum'),
+                    W_Old=('W_Old', 'sum'),
+                    W_New=('W_New', 'sum')
+                )
+                brk['Forskel'] = brk['W_New'] - brk['W_Old']
+                brk['Pakker'] = brk['Pakker'].astype(int)
+                brk = brk.rename(columns={
+                    'Pakker': 'Antal Pakker (>0kg)',
+                    'W_Old': 'Nuværende Pris (kr.)',
+                    'W_New': 'Ny Pris (kr.)',
+                    'Forskel': 'Forskel (kr.)'
+                })
+                st.dataframe(brk.style.format({
+                    'Antal Pakker (>0kg)': '{:,}',
+                    'Nuværende Pris (kr.)': '{:,.0f}',
+                    'Ny Pris (kr.)': '{:,.0f}',
+                    'Forskel (kr.)': '{:,.0f}'
+                }), use_container_width=True)
 
                 if st.button("🚀 Forbered Rapport"):
                     buf = io.BytesIO()
